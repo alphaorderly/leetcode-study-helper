@@ -1,0 +1,169 @@
+{
+  "name": "leetcode-study-helper",
+  "displayName": "리트코드 스터디 도우미",
+  "description": "DaleStudy 리트코드 워크스페이스에서 내 풀이를 찾고 열거나 새로 만듭니다.",
+  "version": "0.1.0",
+  "publisher": "leetcode-study-helper",
+  "license": "MIT",
+  "private": true,
+  "packageManager": "yarn@1.22.22",
+  "engines": {
+    "vscode": "^1.100.0",
+    "node": ">=20",
+    "yarn": ">=1.22.22 <2"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:leetcodeStudyHelper.explorer",
+    "onCommand:leetcodeStudyHelper.refresh",
+    "onCommand:leetcodeStudyHelper.openView"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited"
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "leetcodeStudyHelper.refresh",
+        "title": "새로 고침",
+        "category": "리트코드 스터디 도우미",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "leetcodeStudyHelper.openView",
+        "title": "보기 열기",
+        "category": "리트코드 스터디 도우미"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "leetcodeStudyHelper",
+          "title": "리트코드 스터디 도우미",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "leetcodeStudyHelper": [
+        {
+          "type": "webview",
+          "id": "leetcodeStudyHelper.explorer",
+          "name": "내 풀이"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "leetcodeStudyHelper.refresh",
+          "when": "view == leetcodeStudyHelper.explorer",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "리트코드 스터디 도우미",
+      "properties": {
+        "leetcodeStudyHelper.nickname": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "pattern": "^[A-Za-z0-9-]*$",
+          "patternErrorMessage": "영문, 숫자, 하이픈만 사용할 수 있습니다.",
+          "description": "풀이 파일명의 첫 부분으로 사용할 닉네임입니다. 대소문자를 구분합니다."
+        },
+        "leetcodeStudyHelper.preferredLanguage": {
+          "type": "string",
+          "default": "python3",
+          "scope": "window",
+          "enum": [
+            "cpp",
+            "java",
+            "python",
+            "python3",
+            "c",
+            "csharp",
+            "javascript",
+            "typescript",
+            "php",
+            "swift",
+            "kotlin",
+            "dart",
+            "go",
+            "ruby",
+            "scala",
+            "rust",
+            "racket",
+            "erlang",
+            "elixir"
+          ],
+          "enumDescriptions": [
+            ".cpp",
+            ".java",
+            ".py",
+            ".py",
+            ".c",
+            ".cs",
+            ".js",
+            ".ts",
+            ".php",
+            ".swift",
+            ".kt",
+            ".dart",
+            ".go",
+            ".rb",
+            ".scala",
+            ".rs",
+            ".rkt",
+            ".erl",
+            ".ex"
+          ],
+          "description": "새 풀이 파일을 만들 때 사용할 언어와 확장자입니다."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "package": "yarn typecheck && node esbuild.mjs --production",
+    "vscode:prepublish": "yarn package",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run test/unit test/webview",
+    "test:compile:integration": "tsc -p tsconfig.integration.json",
+    "test:prepare:integration": "node scripts/prepare-integration-fixture.mjs",
+    "test:integration": "yarn package && yarn test:compile:integration && yarn test:prepare:integration && vscode-test",
+    "test": "yarn lint && yarn typecheck && yarn test:unit && yarn test:integration",
+    "package:vsix": "yarn test && vsce package --allow-missing-repository --out .artifacts/leetcode-study-helper.vsix"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@types/jsdom": "latest",
+    "@types/mocha": "latest",
+    "@types/node": "latest",
+    "@types/vscode": "^1.100.0",
+    "@vscode/test-cli": "latest",
+    "@vscode/test-electron": "latest",
+    "@vscode/vsce": "latest",
+    "esbuild": "latest",
+    "eslint": "latest",
+    "jsdom": "latest",
+    "typescript": "6.0.3",
+    "typescript-eslint": "latest",
+    "vitest": "latest"
+  },
+  "resolutions": {
+    "diff": "^8.0.3",
+    "serialize-javascript": "^7.0.5"
+  }
+}

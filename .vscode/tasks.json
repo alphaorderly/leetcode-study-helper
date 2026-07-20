@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "shell",
+      "command": "yarn",
+      "args": ["compile"],
+      "problemMatcher": ["$tsc"],
+      "label": "yarn: 컴파일",
+      "group": "build"
+    },
+    {
+      "type": "shell",
+      "command": "yarn",
+      "args": ["watch"],
+      "problemMatcher": [],
+      "isBackground": true,
+      "label": "yarn: 변경 감지"
+    }
+  ]
+}

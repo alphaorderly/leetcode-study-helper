@@ -1,0 +1,8 @@
+node_modules/
+dist/
+out/
+.tmp/
+.vscode-test/
+.artifacts/*.vsix
+*.log
+.DS_Store

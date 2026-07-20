@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["node", "vscode"],
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "test/unit/**/*.ts", "test/webview/**/*.ts"],
+  "exclude": ["out", "dist", ".tmp"]
+}

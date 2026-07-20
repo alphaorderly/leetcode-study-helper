@@ -1,0 +1,7 @@
+{
+  "valid-anagram": {
+    "difficulty": "Easy",
+    "categories": ["Hash Table", "String"],
+    "blindCategories": ["String"]
+  }
+}

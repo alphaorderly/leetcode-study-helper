@@ -1,0 +1,14 @@
+{
+  "two-sum": {
+    "difficulty": "Easy",
+    "categories": ["Array", "Hash Table"],
+    "blindCategories": ["Array"],
+    "intended_approach": "Use a hash map."
+  },
+  "three-sum": {
+    "difficulty": "Medium",
+    "categories": ["Array", "Two Pointers"],
+    "blindCategories": ["Array"],
+    "intended_approach": "Sort and use two pointers."
+  }
+}
