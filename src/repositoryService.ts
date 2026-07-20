@@ -83,6 +83,7 @@ export class StudyRepositoryService {
           .map(({ name }) => ({
             name,
             uri: vscode.Uri.joinPath(problemUri, name).toString(),
+            gitStatus: 'unknown' as const,
           }))
           .sort((left, right) => left.name.localeCompare(right.name));
 
@@ -101,6 +102,35 @@ export class StudyRepositoryService {
       rootUri: folder.uri.toString(),
       problems,
     };
+  }
+
+  async refreshProblem(
+    repository: RepositorySnapshot,
+    slug: string,
+    nickname: string,
+  ): Promise<RepositorySnapshot> {
+    const problemIndex = repository.problems.findIndex((problem) => problem.slug === slug);
+    if (problemIndex === -1) {
+      return repository;
+    }
+
+    const problemUri = vscode.Uri.joinPath(vscode.Uri.parse(repository.rootUri), slug);
+    const solutions = (await this.readDirectory(problemUri))
+      .filter(({ type }) => (type & vscode.FileType.File) !== 0)
+      .filter(({ name }) => isMatchingSolution(name, nickname))
+      .map(({ name }) => ({
+        name,
+        uri: vscode.Uri.joinPath(problemUri, name).toString(),
+        gitStatus: 'unknown' as const,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const problems = [...repository.problems];
+    problems[problemIndex] = {
+      ...problems[problemIndex]!,
+      completed: solutions.length > 0,
+      solutions,
+    };
+    return { ...repository, problems };
   }
 
   private async readDirectory(uri: vscode.Uri): Promise<DirectoryEntry[]> {

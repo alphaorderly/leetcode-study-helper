@@ -20,6 +20,8 @@ function isWebviewMessage(value: unknown): value is WebviewToExtensionMessage {
     type === 'saveSettings' ||
     type === 'openSolution' ||
     type === 'openProblem' ||
+    type === 'loadCurrentProblem' ||
+    type === 'runCurrentSolution' ||
     type === 'deleteSolution' ||
     type === 'fixAllSolutions' ||
     type === 'createSolution'
@@ -28,15 +30,20 @@ function isWebviewMessage(value: unknown): value is WebviewToExtensionMessage {
 
 export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private view: vscode.WebviewView | undefined;
-  private readonly changeSubscription: vscode.Disposable;
+  private readonly changeSubscriptions: vscode.Disposable[];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly controller: StudyController,
   ) {
-    this.changeSubscription = controller.onDidChange((state) => {
-      void this.post({ type: 'state', state });
-    });
+    this.changeSubscriptions = [
+      controller.onDidChange((state) => {
+        void this.post({ type: 'state', state });
+      }),
+      controller.onDidChangeCurrentProblem((currentProblem) => {
+        void this.post({ type: 'currentProblem', currentProblem });
+      }),
+    ];
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -54,19 +61,22 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
         void this.handleMessage(message);
       }
     });
-    void this.controller.refresh();
   }
 
   dispose(): void {
-    this.changeSubscription.dispose();
+    for (const subscription of this.changeSubscriptions) {
+      subscription.dispose();
+    }
   }
 
   private async handleMessage(message: WebviewToExtensionMessage): Promise<void> {
     try {
       switch (message.type) {
-        case 'ready':
-          await this.post({ type: 'state', state: this.controller.currentSnapshot });
+        case 'ready': {
+          const state = await this.controller.getState();
+          await this.post({ type: 'state', state });
           break;
+        }
         case 'refresh':
           await this.withBusy(() => this.controller.refresh());
           break;
@@ -80,6 +90,12 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
           break;
         case 'openProblem':
           await this.controller.openProblem(message.slug);
+          break;
+        case 'loadCurrentProblem':
+          await this.controller.loadCurrentProblem();
+          break;
+        case 'runCurrentSolution':
+          await this.controller.runCurrentSolution(message.candidateId);
           break;
         case 'deleteSolution':
           await this.withBusy(() => this.controller.deleteSolution(message.uri));
@@ -132,13 +148,19 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; style-src ${webview.cspSource}; script-src 'nonce-${scriptNonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; style-src ${webview.cspSource}; script-src 'nonce-${scriptNonce}';">
     <link rel="stylesheet" href="${styleUri}">
     <title>리트코드 스터디 도우미</title>
   </head>
   <body>
-    <main id="app" aria-live="polite">
-      <p class="empty-state">리트코드 스터디 도우미를 불러오는 중…</p>
+    <main id="app" aria-live="polite" aria-busy="true">
+      <div class="loading-state loading-state-page" role="status">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <span class="loading-copy">
+          <strong class="loading-title">스터디 데이터를 불러오는 중…</strong>
+          <span class="loading-description">워크스페이스의 문제와 풀이를 확인하고 있습니다.</span>
+        </span>
+      </div>
     </main>
     <script nonce="${scriptNonce}" src="${scriptUri}"></script>
   </body>

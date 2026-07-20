@@ -1,20 +1,42 @@
 import * as vscode from 'vscode';
+import { CurrentProblemSession } from './currentProblemSession';
 import { DEFAULT_LANGUAGE, findLanguage, LANGUAGE_OPTIONS } from './core/languages';
 import { isIgnoredByLineLint, isValidNickname } from './core/solutions';
-import type { ExtensionSnapshot, LineLintFixResult } from './core/types';
+import type {
+  CurrentProblemSnapshot,
+  ExtensionSnapshot,
+  LineLintFixResult,
+  RepositorySnapshot,
+} from './core/types';
+import { GitStatusService } from './gitStatusService';
 import { StudyRepositoryService } from './repositoryService';
 import { SolutionFileService } from './solutionFileService';
 
 const CONFIGURATION_SECTION = 'leetcodeStudyHelper';
+const REFRESH_DEBOUNCE_MS = 150;
+
+interface PendingProblemRefresh {
+  rootUri: string;
+  slug: string;
+}
 
 export class StudyController implements vscode.Disposable {
+  private readonly gitStatusService = new GitStatusService();
   private readonly repositoryService = new StudyRepositoryService();
   private readonly solutionFileService = new SolutionFileService();
+  private readonly currentProblemSession: CurrentProblemSession;
   private readonly changeEmitter = new vscode.EventEmitter<ExtensionSnapshot>();
+  private readonly currentProblemEmitter = new vscode.EventEmitter<CurrentProblemSnapshot | undefined>();
   private readonly disposables: vscode.Disposable[] = [];
+  private readonly pendingProblemRefreshes = new Map<string, PendingProblemRefresh>();
+  private readonly problemRefreshes = new Map<string, Promise<void>>();
   private watchers: vscode.FileSystemWatcher[] = [];
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private gitRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private problemRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   private refreshing: Promise<ExtensionSnapshot> | undefined;
+  private gitRefreshing: Promise<void> | undefined;
+  private initialized = false;
   private snapshot: ExtensionSnapshot = {
     nickname: '',
     preferredLanguage: DEFAULT_LANGUAGE,
@@ -25,16 +47,28 @@ export class StudyController implements vscode.Disposable {
   };
 
   readonly onDidChange = this.changeEmitter.event;
+  readonly onDidChangeCurrentProblem = this.currentProblemEmitter.event;
 
-  constructor() {
+  constructor(extensionUri: vscode.Uri) {
+    this.currentProblemSession = new CurrentProblemSession(extensionUri);
     this.rebuildWatchers();
     this.disposables.push(
+      this.gitStatusService,
+      this.currentProblemSession,
+      this.gitStatusService.onDidChange(() => this.scheduleGitRefresh()),
+      this.currentProblemSession.onDidChange((currentProblem) => {
+        this.snapshot = { ...this.snapshot, currentProblem };
+        this.currentProblemEmitter.fire(currentProblem);
+      }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         this.rebuildWatchers();
         this.scheduleRefresh();
       }),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration(CONFIGURATION_SECTION)) {
+        if (
+          event.affectsConfiguration(`${CONFIGURATION_SECTION}.nickname`)
+          || event.affectsConfiguration(`${CONFIGURATION_SECTION}.preferredLanguage`)
+        ) {
           this.scheduleRefresh();
         }
       }),
@@ -46,7 +80,12 @@ export class StudyController implements vscode.Disposable {
     return this.snapshot;
   }
 
+  async getState(): Promise<ExtensionSnapshot> {
+    return this.initialized ? this.snapshot : this.refresh();
+  }
+
   async refresh(): Promise<ExtensionSnapshot> {
+    this.clearScheduledFullRefresh();
     if (this.refreshing) {
       return this.refreshing;
     }
@@ -81,12 +120,12 @@ export class StudyController implements vscode.Disposable {
   }
 
   async openSolution(uriString: string): Promise<void> {
-    const knownUris = new Set(
-      this.snapshot.repositories.flatMap((repository) =>
-        repository.problems.flatMap((problem) => problem.solutions.map(({ uri }) => uri)),
+    const known = this.snapshot.repositories.some((repository) =>
+      repository.problems.some((problem) =>
+        problem.solutions.some(({ uri }) => uri === uriString),
       ),
     );
-    if (!knownUris.has(uriString)) {
+    if (!known) {
       throw new Error('요청한 풀이가 현재 워크스페이스에 없습니다.');
     }
 
@@ -105,10 +144,17 @@ export class StudyController implements vscode.Disposable {
     const problemUri = vscode.Uri.parse(
       `https://leetcode.com/problems/${encodeURIComponent(slug)}/`,
     );
-    const opened = await vscode.env.openExternal(problemUri);
-    if (!opened) {
+    if (!await vscode.env.openExternal(problemUri)) {
       throw new Error('LeetCode 문제 페이지를 열지 못했습니다.');
     }
+  }
+
+  async loadCurrentProblem(): Promise<void> {
+    await this.currentProblemSession.loadProblem();
+  }
+
+  async runCurrentSolution(candidateId: string): Promise<void> {
+    await this.currentProblemSession.run(candidateId);
   }
 
   async deleteSolution(uriString: string, confirm = true): Promise<boolean> {
@@ -116,27 +162,20 @@ export class StudyController implements vscode.Disposable {
       throw new Error('풀이 파일을 삭제하려면 먼저 워크스페이스를 신뢰해야 합니다.');
     }
 
-    const target = this.snapshot.repositories
-      .flatMap((repository) =>
-        repository.problems.flatMap((problem) =>
-          problem.solutions.map((solution) => ({ problem, solution })),
-        ),
-      )
-      .find(({ solution }) => solution.uri === uriString);
+    const target = this.findSolution(uriString);
     if (!target) {
       throw new Error('요청한 풀이가 현재 워크스페이스에 없습니다.');
     }
-
     const result = await this.solutionFileService.delete({
-      uri: vscode.Uri.parse(target.solution.uri),
-      relativePath: `${target.problem.slug}/${target.solution.name}`,
+      uri: vscode.Uri.parse(target.uri),
+      relativePath: `${target.slug}/${target.name}`,
       confirm,
     });
     if (result.status === 'cancelled') {
       return false;
     }
 
-    await this.refresh();
+    await this.refreshProblem(target.rootUri, target.slug, true);
     return true;
   }
 
@@ -158,14 +197,13 @@ export class StudyController implements vscode.Disposable {
       preferredLanguage: this.snapshot.preferredLanguage,
       confirm,
     });
-
     if (result.status === 'cancelled') {
       return undefined;
     }
 
     const document = await vscode.workspace.openTextDocument(result.uri);
     await vscode.window.showTextDocument(document);
-    await this.refresh();
+    await this.refreshProblem(rootUri, slug, true);
     return result.uri.toString();
   }
 
@@ -183,7 +221,6 @@ export class StudyController implements vscode.Disposable {
         .map(({ uri }) => uri),
     )].map((uri) => vscode.Uri.parse(uri));
     const result = await this.solutionFileService.fixLineEndings(eligibleUris);
-
     return {
       ...result,
       ignored: solutions.length - eligibleUris.length,
@@ -191,65 +228,237 @@ export class StudyController implements vscode.Disposable {
   }
 
   dispose(): void {
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
+    this.clearScheduledFullRefresh();
+    if (this.gitRefreshTimer) {
+      clearTimeout(this.gitRefreshTimer);
+    }
+    if (this.problemRefreshTimer) {
+      clearTimeout(this.problemRefreshTimer);
     }
     this.disposeWatchers();
-    this.changeEmitter.dispose();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
+    this.changeEmitter.dispose();
+    this.currentProblemEmitter.dispose();
   }
 
   private async performRefresh(): Promise<ExtensionSnapshot> {
+    const { nickname, preferredLanguage } = this.readSettings();
+    const scanResult = await this.repositoryService.scan(nickname);
+    const repositories = await this.withGitStatuses(scanResult.repositories, true);
+    this.currentProblemSession.setRepositories(repositories);
+    this.snapshot = {
+      nickname,
+      preferredLanguage,
+      languages: [...LANGUAGE_OPTIONS],
+      repositories,
+      issues: scanResult.issues,
+      workspaceTrusted: vscode.workspace.isTrusted,
+      currentProblem: this.currentProblemSession.currentSnapshot,
+    };
+    this.initialized = true;
+    this.changeEmitter.fire(this.snapshot);
+    return this.snapshot;
+  }
+
+  private readSettings(): { nickname: string; preferredLanguage: string } {
     const configuration = vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
     const configuredNickname = configuration.get<string>('nickname', '').trim();
     const configuredLanguage = configuration.get<string>(
       'preferredLanguage',
       DEFAULT_LANGUAGE,
     );
-    const nickname = isValidNickname(configuredNickname) ? configuredNickname : '';
-    const preferredLanguage = findLanguage(configuredLanguage)
-      ? configuredLanguage
-      : DEFAULT_LANGUAGE;
-    const scanResult = await this.repositoryService.scan(nickname);
-
-    this.snapshot = {
-      nickname,
-      preferredLanguage,
-      languages: [...LANGUAGE_OPTIONS],
-      repositories: scanResult.repositories,
-      issues: scanResult.issues,
-      workspaceTrusted: vscode.workspace.isTrusted,
+    return {
+      nickname: isValidNickname(configuredNickname) ? configuredNickname : '',
+      preferredLanguage: findLanguage(configuredLanguage)
+        ? configuredLanguage
+        : DEFAULT_LANGUAGE,
     };
-    this.changeEmitter.fire(this.snapshot);
-    return this.snapshot;
+  }
+
+  private async withGitStatuses(
+    repositories: RepositorySnapshot[],
+    forceStatus: boolean,
+  ): Promise<RepositorySnapshot[]> {
+    return Promise.all(repositories.map(async (repository) => {
+      const solutions = repository.problems.flatMap((problem) => problem.solutions);
+      const result = await this.gitStatusService.getStatuses(
+        vscode.Uri.parse(repository.rootUri),
+        solutions.map(({ uri }) => uri),
+        forceStatus,
+      );
+      return {
+        ...repository,
+        gitRemote: result.remoteName,
+        problems: repository.problems.map((problem) => ({
+          ...problem,
+          solutions: problem.solutions.map((solution) => ({
+            ...solution,
+            gitStatus: result.statuses.get(solution.uri) ?? 'unknown',
+          })),
+        })),
+      };
+    }));
   }
 
   private scheduleRefresh(): void {
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-    }
+    this.clearScheduledFullRefresh();
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
       void this.refresh();
-    }, 150);
+    }, REFRESH_DEBOUNCE_MS);
+  }
+
+  private scheduleGitRefresh(): void {
+    if (!this.initialized) {
+      return;
+    }
+    if (this.gitRefreshTimer) {
+      clearTimeout(this.gitRefreshTimer);
+    }
+    this.gitRefreshTimer = setTimeout(() => {
+      this.gitRefreshTimer = undefined;
+      void this.refreshGitStatuses();
+    }, REFRESH_DEBOUNCE_MS);
+  }
+
+  private async refreshGitStatuses(): Promise<void> {
+    if (this.gitRefreshing) {
+      return this.gitRefreshing;
+    }
+    this.gitRefreshing = (async () => {
+      if (this.refreshing) {
+        await this.refreshing;
+      }
+      const repositories = await this.withGitStatuses(this.snapshot.repositories, false);
+      this.publishRepositories(repositories);
+    })();
+    try {
+      await this.gitRefreshing;
+    } finally {
+      this.gitRefreshing = undefined;
+    }
+  }
+
+  private async refreshProblem(rootUri: string, slug: string, forceStatus: boolean): Promise<void> {
+    const key = this.problemKey(rootUri, slug);
+    this.pendingProblemRefreshes.delete(key);
+    const existing = this.problemRefreshes.get(key);
+    if (existing) {
+      return existing;
+    }
+    const refresh = (async () => {
+      const repository = this.snapshot.repositories.find((item) => item.rootUri === rootUri);
+      if (!repository) {
+        return;
+      }
+      const updated = await this.repositoryService.refreshProblem(
+        repository,
+        slug,
+        this.snapshot.nickname,
+      );
+      const [withGit] = await this.withGitStatuses([updated], forceStatus);
+      if (!withGit) {
+        return;
+      }
+      this.publishRepositories(
+        this.snapshot.repositories.map((item) => item.rootUri === rootUri ? withGit : item),
+      );
+    })();
+    this.problemRefreshes.set(key, refresh);
+    try {
+      await refresh;
+    } finally {
+      this.problemRefreshes.delete(key);
+    }
+  }
+
+  private publishRepositories(repositories: RepositorySnapshot[]): void {
+    this.currentProblemSession.setRepositories(repositories);
+    this.snapshot = {
+      ...this.snapshot,
+      repositories,
+      currentProblem: this.currentProblemSession.currentSnapshot,
+    };
+    this.changeEmitter.fire(this.snapshot);
+  }
+
+  private findSolution(uri: string): {
+    rootUri: string;
+    slug: string;
+    name: string;
+    uri: string;
+  } | undefined {
+    for (const repository of this.snapshot.repositories) {
+      for (const problem of repository.problems) {
+        const solution = problem.solutions.find((item) => item.uri === uri);
+        if (solution) {
+          return {
+            rootUri: repository.rootUri,
+            slug: problem.slug,
+            name: solution.name,
+            uri: solution.uri,
+          };
+        }
+      }
+    }
+    return undefined;
   }
 
   private rebuildWatchers(): void {
     this.disposeWatchers();
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
-      const patterns = [
+      const catalogWatcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(folder, 'problem-categories.json'),
+      );
+      catalogWatcher.onDidCreate(() => this.scheduleRefresh());
+      catalogWatcher.onDidChange(() => this.scheduleRefresh());
+      catalogWatcher.onDidDelete(() => this.scheduleRefresh());
+
+      const solutionWatcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(folder, '*/*'),
-      ];
-      for (const pattern of patterns) {
-        const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-        watcher.onDidCreate(() => this.scheduleRefresh());
-        watcher.onDidChange(() => this.scheduleRefresh());
-        watcher.onDidDelete(() => this.scheduleRefresh());
-        this.watchers.push(watcher);
-      }
+      );
+      solutionWatcher.onDidCreate((uri) => this.scheduleProblemRefresh(folder, uri));
+      solutionWatcher.onDidDelete((uri) => this.scheduleProblemRefresh(folder, uri));
+      this.watchers.push(catalogWatcher, solutionWatcher);
+    }
+  }
+
+  private scheduleProblemRefresh(folder: vscode.WorkspaceFolder, uri: vscode.Uri): void {
+    const folderPath = folder.uri.path.endsWith('/') ? folder.uri.path : `${folder.uri.path}/`;
+    if (!uri.path.startsWith(folderPath)) {
+      return;
+    }
+    const [slug] = uri.path.slice(folderPath.length).split('/');
+    if (!slug) {
+      return;
+    }
+    const pending = { rootUri: folder.uri.toString(), slug };
+    this.pendingProblemRefreshes.set(this.problemKey(pending.rootUri, slug), pending);
+    if (this.problemRefreshTimer) {
+      clearTimeout(this.problemRefreshTimer);
+    }
+    this.problemRefreshTimer = setTimeout(() => {
+      this.problemRefreshTimer = undefined;
+      const refreshes = [...this.pendingProblemRefreshes.values()];
+      this.pendingProblemRefreshes.clear();
+      void (async () => {
+        for (const item of refreshes) {
+          await this.refreshProblem(item.rootUri, item.slug, true);
+        }
+      })();
+    }, REFRESH_DEBOUNCE_MS);
+  }
+
+  private problemKey(rootUri: string, slug: string): string {
+    return `${rootUri}\u0000${slug}`;
+  }
+
+  private clearScheduledFullRefresh(): void {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = undefined;
     }
   }
 

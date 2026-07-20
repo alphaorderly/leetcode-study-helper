@@ -7,9 +7,12 @@ export interface ProblemMetadata {
 
 export type ProblemCatalog = Record<string, ProblemMetadata>;
 
+export type SolutionGitStatus = 'pushed' | 'unpushed' | 'unknown';
+
 export interface SolutionFileSnapshot {
   name: string;
   uri: string;
+  gitStatus: SolutionGitStatus;
 }
 
 export interface ProblemSnapshot extends ProblemMetadata {
@@ -22,8 +25,81 @@ export interface ProblemSnapshot extends ProblemMetadata {
 export interface RepositorySnapshot {
   name: string;
   rootUri: string;
+  gitRemote?: string;
   problems: ProblemSnapshot[];
 }
+
+export interface ProblemTopicTag {
+  name: string;
+  slug: string;
+}
+
+export interface LeetCodeProblemDetail {
+  questionId: string;
+  title: string;
+  titleSlug: string;
+  content?: string;
+  difficulty: string;
+  isPaidOnly: boolean;
+  topicTags: ProblemTopicTag[];
+}
+
+interface CurrentProblemBase {
+  rootUri: string;
+  slug: string;
+  solution: SolutionFileSnapshot;
+  runner: PythonRunnerSnapshot;
+}
+
+export interface PythonSolutionCandidate {
+  id: string;
+  label: string;
+  classLine: number;
+  methodLine: number;
+}
+
+interface PythonRunnerWithCandidates {
+  candidates: PythonSolutionCandidate[];
+  selectedCandidateId: string;
+}
+
+export type PythonRunnerSnapshot =
+  | { status: 'checking' }
+  | { status: 'unavailable'; reason: string; missingObjects?: string[] }
+  | ({ status: 'ready' } & PythonRunnerWithCandidates)
+  | ({ status: 'running' } & PythonRunnerWithCandidates)
+  | ({
+      status: 'passed';
+      passed: number;
+      total: number;
+      durationMs: number;
+      stdout?: string;
+      stderr?: string;
+    } & PythonRunnerWithCandidates)
+  | ({
+      status: 'failed';
+      passed: number;
+      total: number;
+      failedCase: number;
+      assertion?: string;
+      durationMs: number;
+      stdout?: string;
+      stderr?: string;
+    } & PythonRunnerWithCandidates)
+  | ({
+      status: 'error';
+      message: string;
+      testCase?: number;
+      traceback?: string;
+      stdout?: string;
+      stderr?: string;
+    } & Partial<PythonRunnerWithCandidates>);
+
+export type CurrentProblemSnapshot =
+  | (CurrentProblemBase & { status: 'idle' })
+  | (CurrentProblemBase & { status: 'loading' })
+  | (CurrentProblemBase & { status: 'loaded'; detail: LeetCodeProblemDetail })
+  | (CurrentProblemBase & { status: 'error'; message: string });
 
 export interface DetectionIssue {
   rootName: string;
@@ -43,6 +119,7 @@ export interface ExtensionSnapshot {
   repositories: RepositorySnapshot[];
   issues: DetectionIssue[];
   workspaceTrusted: boolean;
+  currentProblem?: CurrentProblemSnapshot;
 }
 
 export interface LineLintFixResult {
@@ -57,10 +134,13 @@ export type WebviewToExtensionMessage =
   | { type: 'saveSettings'; nickname: string; preferredLanguage: string }
   | { type: 'openSolution'; uri: string }
   | { type: 'openProblem'; slug: string }
+  | { type: 'loadCurrentProblem' }
+  | { type: 'runCurrentSolution'; candidateId: string }
   | { type: 'deleteSolution'; uri: string }
   | { type: 'fixAllSolutions' }
   | { type: 'createSolution'; rootUri: string; slug: string };
 
 export type ExtensionToWebviewMessage =
   | { type: 'state'; state: ExtensionSnapshot }
+  | { type: 'currentProblem'; currentProblem?: CurrentProblemSnapshot }
   | { type: 'busy'; value: boolean };
