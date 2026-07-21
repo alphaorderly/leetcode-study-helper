@@ -10,43 +10,66 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      TAG_NAME: ${{ github.ref_name }}
+      RELEASE_ASSET: .artifacts/leetcode-study-helper-${{ github.ref_name }}.vsix
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Ensure tag is on main
-        run: |
-          git fetch origin main
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
-            echo "Tag ${GITHUB_REF_NAME} is not on main. Aborting release."
-            exit 1
-          fi
-
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: yarn
 
+      - name: Validate release tag
+        run: |
+          set -euo pipefail
+
+          package_version="$(node -p "require('./package.json').version")"
+          expected_tag="v${package_version}"
+          if [ "${TAG_NAME}" != "${expected_tag}" ]; then
+            echo "Tag ${TAG_NAME} does not match package.json version ${package_version}."
+            echo "Expected tag: ${expected_tag}"
+            exit 1
+          fi
+
+          git fetch origin main
+          tag_commit="$(git rev-list -n 1 "${TAG_NAME}")"
+          if ! git merge-base --is-ancestor "${tag_commit}" origin/main; then
+            echo "Tag ${TAG_NAME} is not on main. Aborting release."
+            exit 1
+          fi
+
+          echo "RELEASE_VERSION=${package_version}" >> "${GITHUB_ENV}"
+
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
-      - name: Build VSIX
-        uses: coactions/setup-xvfb@v1
-        with:
-          run: yarn package:vsix
+      - name: Test
+        run: xvfb-run --auto-servernum yarn test
 
-      - name: Prepare release asset
+      - name: Build VSIX
+        run: yarn vsce package --allow-missing-repository --out "${RELEASE_ASSET}"
+
+      - name: Verify VSIX version
         run: |
-          mv .artifacts/leetcode-study-helper.vsix \
-            ".artifacts/leetcode-study-helper-${GITHUB_REF_NAME}.vsix"
+          set -euo pipefail
+
+          packaged_version="$(unzip -p "${RELEASE_ASSET}" extension/package.json |
+            node -e "const fs = require('node:fs'); process.stdout.write(JSON.parse(fs.readFileSync(0, 'utf8')).version);")"
+          if [ "${packaged_version}" != "${RELEASE_VERSION}" ]; then
+            echo "VSIX version ${packaged_version} does not match release version ${RELEASE_VERSION}."
+            exit 1
+          fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          files: .artifacts/leetcode-study-helper-${{ github.ref_name }}.vsix
+          files: ${{ env.RELEASE_ASSET }}
           generate_release_notes: true
           fail_on_unmatched_files: true
