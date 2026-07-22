@@ -7,7 +7,7 @@ export interface ProblemMetadata {
 
 export type ProblemCatalog = Record<string, ProblemMetadata>;
 
-export type SolutionGitStatus = 'pushed' | 'unpushed' | 'unknown';
+export type SolutionGitStatus = 'checking' | 'pushed' | 'unpushed' | 'unknown';
 
 export interface SolutionFileSnapshot {
   name: string;

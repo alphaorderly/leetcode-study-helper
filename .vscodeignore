@@ -5,6 +5,7 @@
 .artifacts/**
 .vscode/**
 .vscode-test.mjs
+media/extension-icon-source.svg
 .gitignore
 .nvmrc
 src/**

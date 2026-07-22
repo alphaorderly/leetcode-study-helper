@@ -24,24 +24,24 @@ function isMissingFile(error: unknown): boolean {
 
 export class StudyRepositoryService {
   async scan(nickname: string): Promise<ScanResult> {
-    const repositories: RepositorySnapshot[] = [];
-    const issues: DetectionIssue[] = [];
-
-    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const results = await Promise.all((vscode.workspace.workspaceFolders ?? []).map(async (folder) => {
       try {
         const repository = await this.scanFolder(folder, nickname);
-        if (repository) {
-          repositories.push(repository);
-        }
+        return { repository };
       } catch (error) {
-        issues.push({
-          rootName: folder.name,
-          message: error instanceof Error ? error.message : String(error),
-        });
+        return {
+          issue: {
+            rootName: folder.name,
+            message: error instanceof Error ? error.message : String(error),
+          },
+        };
       }
-    }
+    }));
 
-    return { repositories, issues };
+    return {
+      repositories: results.flatMap(({ repository }) => repository ? [repository] : []),
+      issues: results.flatMap(({ issue }) => issue ? [issue] : []),
+    };
   }
 
   private async scanFolder(

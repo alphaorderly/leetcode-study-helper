@@ -8,7 +8,7 @@ const execFileAsync = promisify(execFile);
 interface SolutionFileSnapshot {
   name: string;
   uri: string;
-  gitStatus: 'pushed' | 'unpushed' | 'unknown';
+  gitStatus: 'checking' | 'pushed' | 'unpushed' | 'unknown';
 }
 
 interface ProblemSnapshot {
@@ -73,7 +73,7 @@ suite('LeetCode Study Helper integration', () => {
 
   suiteSetup(async () => {
     const extension = vscode.extensions.getExtension(
-      'leetcode-study-helper.leetcode-study-helper',
+      'alphaorderly.leetcode-study-helper',
     );
     assert.ok(extension, 'Extension should be discoverable in the development host.');
     await extension.activate();

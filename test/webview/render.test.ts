@@ -402,6 +402,24 @@ describe('webview rendering', () => {
 
     expect(root.querySelector('.solution-git-status.unknown')?.textContent)
       .toBe('푸시 상태 확인 불가');
+
+    const checkingSnapshot: ExtensionSnapshot = {
+      ...unknownSnapshot,
+      repositories: unknownSnapshot.repositories.map((repository) => ({
+        ...repository,
+        problems: repository.problems.map((problem) => ({
+          ...problem,
+          solutions: problem.solutions.map((solution) => ({
+            ...solution,
+            gitStatus: 'checking',
+          })),
+        })),
+      })),
+    };
+    renderApp(root, checkingSnapshot, ui, vi.fn());
+
+    expect(root.querySelector('.solution-git-status.checking')?.textContent)
+      .toBe('푸시 상태 확인 중');
   });
 
   it('filters to the displayed solution when unpushed-only is checked', () => {

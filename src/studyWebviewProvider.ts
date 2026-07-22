@@ -73,8 +73,8 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
     try {
       switch (message.type) {
         case 'ready': {
-          const state = await this.controller.getState();
-          await this.post({ type: 'state', state });
+          await this.controller.getState();
+          await this.post({ type: 'state', state: this.controller.currentSnapshot });
           break;
         }
         case 'refresh':

@@ -36,6 +36,8 @@ export class StudyController implements vscode.Disposable {
   private problemRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   private refreshing: Promise<ExtensionSnapshot> | undefined;
   private gitRefreshing: Promise<void> | undefined;
+  private gitRefreshRequested = false;
+  private forceGitRefreshRequested = false;
   private initialized = false;
   private snapshot: ExtensionSnapshot = {
     nickname: '',
@@ -246,7 +248,7 @@ export class StudyController implements vscode.Disposable {
   private async performRefresh(): Promise<ExtensionSnapshot> {
     const { nickname, preferredLanguage } = this.readSettings();
     const scanResult = await this.repositoryService.scan(nickname);
-    const repositories = await this.withGitStatuses(scanResult.repositories, true);
+    const repositories = this.reuseGitStatuses(scanResult.repositories);
     this.currentProblemSession.setRepositories(repositories);
     this.snapshot = {
       nickname,
@@ -259,7 +261,32 @@ export class StudyController implements vscode.Disposable {
     };
     this.initialized = true;
     this.changeEmitter.fire(this.snapshot);
+    void this.refreshGitStatuses(true);
     return this.snapshot;
+  }
+
+  private reuseGitStatuses(repositories: RepositorySnapshot[]): RepositorySnapshot[] {
+    const previousRepositories = new Map(
+      this.snapshot.repositories.map((repository) => [repository.rootUri, repository]),
+    );
+    return repositories.map((repository) => {
+      const previousRepository = previousRepositories.get(repository.rootUri);
+      const previousSolutions = new Map(
+        previousRepository?.problems.flatMap((problem) => problem.solutions)
+          .map((solution) => [solution.uri, solution] as const) ?? [],
+      );
+      return {
+        ...repository,
+        gitRemote: previousRepository?.gitRemote,
+        problems: repository.problems.map((problem) => ({
+          ...problem,
+          solutions: problem.solutions.map((solution) => ({
+            ...solution,
+            gitStatus: previousSolutions.get(solution.uri)?.gitStatus ?? 'checking',
+          })),
+        })),
+      };
+    });
   }
 
   private readSettings(): { nickname: string; preferredLanguage: string } {
@@ -323,21 +350,37 @@ export class StudyController implements vscode.Disposable {
     }, REFRESH_DEBOUNCE_MS);
   }
 
-  private async refreshGitStatuses(): Promise<void> {
+  private async refreshGitStatuses(forceStatus = false): Promise<void> {
+    this.gitRefreshRequested = true;
+    this.forceGitRefreshRequested ||= forceStatus;
     if (this.gitRefreshing) {
       return this.gitRefreshing;
     }
-    this.gitRefreshing = (async () => {
-      if (this.refreshing) {
-        await this.refreshing;
-      }
-      const repositories = await this.withGitStatuses(this.snapshot.repositories, false);
-      this.publishRepositories(repositories);
-    })();
+
+    this.gitRefreshing = this.drainGitRefreshes();
     try {
       await this.gitRefreshing;
     } finally {
       this.gitRefreshing = undefined;
+    }
+  }
+
+  private async drainGitRefreshes(): Promise<void> {
+    while (this.gitRefreshRequested) {
+      this.gitRefreshRequested = false;
+      const forceStatus = this.forceGitRefreshRequested;
+      this.forceGitRefreshRequested = false;
+      if (this.refreshing) {
+        await this.refreshing;
+      }
+      const sourceRepositories = this.snapshot.repositories;
+      const repositories = await this.withGitStatuses(sourceRepositories, forceStatus);
+      if (this.snapshot.repositories === sourceRepositories) {
+        this.publishRepositories(repositories);
+      } else {
+        this.gitRefreshRequested = true;
+        this.forceGitRefreshRequested ||= forceStatus;
+      }
     }
   }
 

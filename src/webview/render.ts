@@ -279,6 +279,8 @@ function gitStatusLabel(
 ): string {
   const remote = repository.gitRemote ?? '원격';
   switch (solution.gitStatus) {
+    case 'checking':
+      return '푸시 상태 확인 중';
     case 'pushed':
       return `${remote}`;
     case 'unpushed':
@@ -294,6 +296,8 @@ function gitStatusTitle(
 ): string {
   const remote = repository.gitRemote ?? '원격 저장소';
   switch (solution.gitStatus) {
+    case 'checking':
+      return `${solution.name}의 푸시 상태를 확인하고 있습니다.`;
     case 'pushed':
       return `${solution.name}의 로컬 변경이 모두 ${remote}에 반영되어 있습니다.`;
     case 'unpushed':

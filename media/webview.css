@@ -794,6 +794,7 @@ button:disabled {
   color: var(--vscode-gitDecoration-modifiedResourceForeground, #d0a03a);
 }
 
+.solution-git-status.checking,
 .solution-git-status.unknown {
   color: var(--vscode-descriptionForeground);
 }

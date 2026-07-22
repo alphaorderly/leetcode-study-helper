@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">LeetCode Study Helper extension icon</title>
+  <rect x="16" y="16" width="480" height="480" rx="92" fill="#202124"/>
+  <path
+    d="M186 142 92 256l94 114"
+    fill="none"
+    stroke="#FFA116"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="46"
+  />
+  <path
+    d="m326 142 94 114-94 114"
+    fill="none"
+    stroke="#FFA116"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="46"
+  />
+  <path
+    d="m296 116-80 280"
+    fill="none"
+    stroke="#F5F5F5"
+    stroke-linecap="round"
+    stroke-width="42"
+  />
+</svg>

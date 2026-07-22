@@ -2,9 +2,18 @@
   "name": "leetcode-study-helper",
   "displayName": "리트코드 스터디 도우미",
   "description": "DaleStudy 리트코드 워크스페이스에서 내 풀이를 찾고 열거나 새로 만듭니다.",
-  "version": "1.0.4",
-  "publisher": "leetcode-study-helper",
+  "version": "1.0.5",
+  "publisher": "alphaorderly",
   "license": "MIT",
+  "icon": "media/extension-icon.png",
+  "galleryBanner": {
+    "color": "#202124",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alphaorderly/leetcode-study-helper.git"
+  },
   "private": true,
   "packageManager": "yarn@1.22.22",
   "engines": {
