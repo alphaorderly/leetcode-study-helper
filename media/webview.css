@@ -168,6 +168,7 @@ button:focus-visible {
 .primary-button,
 .secondary-button,
 .problem-page-button,
+.other-solution-button,
 .delete-button,
 .open-page-button,
 .filter-button,
@@ -719,6 +720,12 @@ button:disabled {
   border-radius: 2px;
 }
 
+.other-solution-button {
+  min-height: 24px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
 .trash-icon,
 .external-link-icon {
   width: 14px;
@@ -807,6 +814,7 @@ button:disabled {
 }
 
 .delete-button,
+.other-solution-button,
 .open-page-button {
   color: var(--vscode-descriptionForeground);
   background: transparent;
@@ -814,6 +822,7 @@ button:disabled {
 }
 
 .delete-button:hover:not(:disabled),
+.other-solution-button:hover:not(:disabled),
 .open-page-button:hover:not(:disabled) {
   color: var(--vscode-foreground);
   background: var(--ui-surface-hover);

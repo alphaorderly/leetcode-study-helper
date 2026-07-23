@@ -17,6 +17,7 @@ const baseSnapshot: ExtensionSnapshot = {
       categories: [],
       blindCategories: [],
       completed: true,
+      hasOtherSolutions: true,
       solutions: [{
         name: 'CaseUser.py',
         uri: 'file:///study-a/two-sum/CaseUser.py',

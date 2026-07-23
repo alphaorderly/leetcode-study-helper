@@ -100,6 +100,7 @@ describe('StudyController startup', () => {
               categories: [],
               blindCategories: [],
               completed: true,
+              hasOtherSolutions: false,
               solutions: [{
                 name: 'CaseUser.py',
                 uri: solutionUri,
@@ -116,7 +117,10 @@ describe('StudyController startup', () => {
     }));
 
     const { StudyController } = await import('../../src/studyController.js');
-    const controller = new StudyController({} as never);
+    const controller = new StudyController(
+      {} as never,
+      { get: () => undefined, update: async () => {} },
+    );
     const initial = await controller.getState();
 
     expect(initial.repositories[0]?.problems[0]?.solutions[0]?.gitStatus)

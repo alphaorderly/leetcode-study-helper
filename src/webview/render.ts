@@ -362,6 +362,33 @@ function renderProblem(
 
   const actions = element('div', 'solution-actions');
   const actionButtons = element('div', 'solution-action-buttons');
+  const otherSolutionButton = element(
+    'button',
+    'other-solution-button',
+    '다른 풀이',
+  );
+  otherSolutionButton.type = 'button';
+  otherSolutionButton.setAttribute(
+    'aria-label',
+    `${problemTitle} 다른 참여자의 풀이 열기`,
+  );
+  otherSolutionButton.disabled = ui.busy || !state.nickname || !problem.hasOtherSolutions;
+  if (!state.nickname) {
+    otherSolutionButton.title = '닉네임 설정 후 사용할 수 있습니다.';
+  } else if (!problem.hasOtherSolutions) {
+    otherSolutionButton.title = '다른 참여자의 풀이가 없습니다.';
+  } else {
+    otherSolutionButton.title = '다른 참여자의 풀이 열기';
+  }
+  otherSolutionButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    post({
+      type: 'openOtherSolution',
+      rootUri: repository.rootUri,
+      slug: problem.slug,
+    });
+  });
+  actionButtons.append(otherSolutionButton);
   if (solution) {
     const status = element('span', 'solution-status has-file');
     status.title = gitStatusTitle(solution, repository);

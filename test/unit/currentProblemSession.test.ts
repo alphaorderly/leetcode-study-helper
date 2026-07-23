@@ -32,6 +32,7 @@ const repositories: RepositorySnapshot[] = [{
     categories: [],
     blindCategories: [],
     completed: true,
+    hasOtherSolutions: false,
     solutions: [{ name: 'CaseUser.py', uri: solutionUri, gitStatus: 'pushed' }],
   }],
 }];

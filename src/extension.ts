@@ -5,7 +5,7 @@ import { StudyWebviewProvider } from './studyWebviewProvider';
 const VIEW_ID = 'leetcodeStudyHelper.explorer';
 
 export function activate(context: vscode.ExtensionContext): void {
-  const controller = new StudyController(context.extensionUri);
+  const controller = new StudyController(context.extensionUri, context.globalState);
   const provider = new StudyWebviewProvider(context.extensionUri, controller);
 
   context.subscriptions.push(
@@ -25,6 +25,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'leetcodeStudyHelper.__createSolution',
       (rootUri: string, slug: string) => controller.createSolution(rootUri, slug, false),
+    ),
+    vscode.commands.registerCommand(
+      'leetcodeStudyHelper.__openOtherSolution',
+      (rootUri: string, slug: string) => controller.openOtherSolution(rootUri, slug, false),
     ),
     vscode.commands.registerCommand(
       'leetcodeStudyHelper.__deleteSolution',

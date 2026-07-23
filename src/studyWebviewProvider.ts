@@ -19,6 +19,7 @@ function isWebviewMessage(value: unknown): value is WebviewToExtensionMessage {
     type === 'refresh' ||
     type === 'saveSettings' ||
     type === 'openSolution' ||
+    type === 'openOtherSolution' ||
     type === 'openProblem' ||
     type === 'loadCurrentProblem' ||
     type === 'runCurrentSolution' ||
@@ -87,6 +88,11 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
           break;
         case 'openSolution':
           await this.controller.openSolution(message.uri);
+          break;
+        case 'openOtherSolution':
+          await this.withBusy(() =>
+            this.controller.openOtherSolution(message.rootUri, message.slug),
+          );
           break;
         case 'openProblem':
           await this.controller.openProblem(message.slug);

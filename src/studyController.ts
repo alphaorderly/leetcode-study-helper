@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import { CurrentProblemSession } from './currentProblemSession';
 import { DEFAULT_LANGUAGE, findLanguage, LANGUAGE_OPTIONS } from './core/languages';
+import {
+  confirmOtherSolutionAccess,
+  type ConsentState,
+  OTHER_SOLUTION_CONFIRM_LABEL,
+} from './core/otherSolutions';
 import { isIgnoredByLineLint, isValidNickname } from './core/solutions';
 import type {
   CurrentProblemSnapshot,
@@ -30,6 +35,7 @@ export class StudyController implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private readonly pendingProblemRefreshes = new Map<string, PendingProblemRefresh>();
   private readonly problemRefreshes = new Map<string, Promise<void>>();
+  private readonly lastOtherSolutionNames = new Map<string, string>();
   private watchers: vscode.FileSystemWatcher[] = [];
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private gitRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -51,7 +57,10 @@ export class StudyController implements vscode.Disposable {
   readonly onDidChange = this.changeEmitter.event;
   readonly onDidChangeCurrentProblem = this.currentProblemEmitter.event;
 
-  constructor(extensionUri: vscode.Uri) {
+  constructor(
+    extensionUri: vscode.Uri,
+    private readonly consentState: ConsentState,
+  ) {
     this.currentProblemSession = new CurrentProblemSession(extensionUri);
     this.rebuildWatchers();
     this.disposables.push(
@@ -133,6 +142,60 @@ export class StudyController implements vscode.Disposable {
 
     const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriString));
     await vscode.window.showTextDocument(document);
+  }
+
+  async openOtherSolution(
+    rootUri: string,
+    slug: string,
+    confirm = true,
+  ): Promise<string | undefined> {
+    const repository = this.snapshot.repositories.find((item) => item.rootUri === rootUri);
+    const problem = repository?.problems.find((item) => item.slug === slug);
+    if (!repository || !problem) {
+      throw new Error('요청한 문제가 현재 워크스페이스에 없습니다.');
+    }
+
+    const preferredLanguage = findLanguage(this.snapshot.preferredLanguage);
+    if (!preferredLanguage) {
+      throw new Error('기본 언어 설정을 확인할 수 없습니다.');
+    }
+
+    const key = this.problemKey(rootUri, slug);
+    const uri = await this.repositoryService.findOtherSolution(
+      repository,
+      slug,
+      this.snapshot.nickname,
+      preferredLanguage.extension,
+      this.lastOtherSolutionNames.get(key),
+    );
+    if (!uri) {
+      await vscode.window.showInformationMessage(
+        '이 문제에는 다른 참여자의 풀이가 없습니다.',
+      );
+      return undefined;
+    }
+
+    if (confirm && !await confirmOtherSolutionAccess(
+      this.consentState,
+      () => vscode.window.showWarningMessage(
+        '다른 참여자의 풀이를 열까요?',
+        {
+          modal: true,
+          detail: '아직 직접 풀지 않았다면 풀이 내용이 노출될 수 있습니다. 동의하면 다음부터는 다시 묻지 않습니다.',
+        },
+        OTHER_SOLUTION_CONFIRM_LABEL,
+      ),
+    )) {
+      return undefined;
+    }
+
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document, { preview: true });
+    this.lastOtherSolutionNames.set(
+      key,
+      uri.path.split('/').pop() ?? uri.path,
+    );
+    return uri.toString();
   }
 
   async openProblem(slug: string): Promise<void> {

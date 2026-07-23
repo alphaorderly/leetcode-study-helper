@@ -19,6 +19,7 @@ export interface ProblemSnapshot extends ProblemMetadata {
   slug: string;
   week?: number;
   completed: boolean;
+  hasOtherSolutions: boolean;
   solutions: SolutionFileSnapshot[];
 }
 
@@ -133,6 +134,7 @@ export type WebviewToExtensionMessage =
   | { type: 'refresh' }
   | { type: 'saveSettings'; nickname: string; preferredLanguage: string }
   | { type: 'openSolution'; uri: string }
+  | { type: 'openOtherSolution'; rootUri: string; slug: string }
   | { type: 'openProblem'; slug: string }
   | { type: 'loadCurrentProblem' }
   | { type: 'runCurrentSolution'; candidateId: string }

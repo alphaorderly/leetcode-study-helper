@@ -26,6 +26,7 @@ const snapshot: ExtensionSnapshot = {
           blindCategories: ['Array'],
           intendedApproach: 'Use a hash map.',
           completed: true,
+          hasOtherSolutions: true,
           solutions: [
             {
               name: 'CaseUser.ts',
@@ -47,6 +48,7 @@ const snapshot: ExtensionSnapshot = {
           blindCategories: ['Array'],
           intendedApproach: 'Sort and use two pointers.',
           completed: false,
+          hasOtherSolutions: false,
           solutions: [],
         },
       ],
@@ -120,6 +122,16 @@ describe('webview rendering', () => {
     expect(root.querySelectorAll('.solution-status.no-file')).toHaveLength(1);
     expect(root.querySelector('.solution-git-status.pushed')).not.toBeNull();
     expect(root.querySelectorAll('.problem-card-action')).toHaveLength(2);
+    expect(root.querySelectorAll('.other-solution-button')).toHaveLength(2);
+    expect((root.querySelector(
+      '.problem-card.completed .other-solution-button',
+    ) as HTMLButtonElement).disabled).toBe(false);
+    expect((root.querySelector(
+      '.problem-card.incomplete .other-solution-button',
+    ) as HTMLButtonElement).disabled).toBe(true);
+    expect(root.querySelector('.other-solution-button')?.textContent).toBe('다른 풀이');
+    expect(root.querySelector('.other-solution-button')?.getAttribute('aria-label'))
+      .toBe('Two Sum 다른 참여자의 풀이 열기');
     expect(root.querySelectorAll('.open-page-button')).toHaveLength(2);
     expect(root.querySelectorAll('.open-page-button .external-link-icon')).toHaveLength(2);
     expect(root.querySelector('.open-page-button')?.textContent).toBe('');
@@ -476,6 +488,9 @@ describe('webview rendering', () => {
     root.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true }));
     (root.querySelector('.lint-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.completed .problem-card-action') as HTMLButtonElement).click();
+    (root.querySelector(
+      '.problem-card.completed .other-solution-button',
+    ) as HTMLButtonElement).click();
     (root.querySelector('.delete-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.completed .open-page-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.incomplete .problem-card-action') as HTMLButtonElement).click();
@@ -494,6 +509,11 @@ describe('webview rendering', () => {
       uri: 'file:///study-a/two-sum/CaseUser.py',
     });
     expect(post).toHaveBeenCalledWith({
+      type: 'openOtherSolution',
+      rootUri: 'file:///study-a',
+      slug: 'two-sum',
+    });
+    expect(post).toHaveBeenCalledWith({
       type: 'deleteSolution',
       uri: 'file:///study-a/two-sum/CaseUser.py',
     });
@@ -510,7 +530,7 @@ describe('webview rendering', () => {
       type: 'openProblem',
       slug: 'three-sum',
     });
-    expect(post).toHaveBeenCalledTimes(7);
+    expect(post).toHaveBeenCalledTimes(8);
   });
 
   it('filters by status and search text', () => {

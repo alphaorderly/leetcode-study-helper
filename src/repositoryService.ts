@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
 import { parseProblemCatalog } from './core/catalog';
+import {
+  isOtherSolutionFile,
+  selectRandomOtherSolution,
+} from './core/otherSolutions';
 import { isMatchingSolution } from './core/solutions';
 import { getProblemWeek } from './core/studySchedule';
 import type {
@@ -77,10 +81,12 @@ export class StudyRepositoryService {
       slugs.map(async (slug): Promise<ProblemSnapshot> => {
         const problemUri = vscode.Uri.joinPath(folder.uri, slug);
         const entries = await this.readDirectory(problemUri);
-        const solutions = entries
+        const fileNames = entries
           .filter(({ type }) => (type & vscode.FileType.File) !== 0)
-          .filter(({ name }) => isMatchingSolution(name, nickname))
-          .map(({ name }) => ({
+          .map(({ name }) => name);
+        const solutions = fileNames
+          .filter((name) => isMatchingSolution(name, nickname))
+          .map((name) => ({
             name,
             uri: vscode.Uri.joinPath(problemUri, name).toString(),
             gitStatus: 'unknown' as const,
@@ -92,6 +98,9 @@ export class StudyRepositoryService {
           week: getProblemWeek(slug),
           ...catalog[slug]!,
           completed: solutions.length > 0,
+          hasOtherSolutions: fileNames.some(
+            (name) => isOtherSolutionFile(name, nickname),
+          ),
           solutions,
         };
       }),
@@ -115,10 +124,12 @@ export class StudyRepositoryService {
     }
 
     const problemUri = vscode.Uri.joinPath(vscode.Uri.parse(repository.rootUri), slug);
-    const solutions = (await this.readDirectory(problemUri))
+    const fileNames = (await this.readDirectory(problemUri))
       .filter(({ type }) => (type & vscode.FileType.File) !== 0)
-      .filter(({ name }) => isMatchingSolution(name, nickname))
-      .map(({ name }) => ({
+      .map(({ name }) => name);
+    const solutions = fileNames
+      .filter((name) => isMatchingSolution(name, nickname))
+      .map((name) => ({
         name,
         uri: vscode.Uri.joinPath(problemUri, name).toString(),
         gitStatus: 'unknown' as const,
@@ -128,9 +139,32 @@ export class StudyRepositoryService {
     problems[problemIndex] = {
       ...problems[problemIndex]!,
       completed: solutions.length > 0,
+      hasOtherSolutions: fileNames.some(
+        (name) => isOtherSolutionFile(name, nickname),
+      ),
       solutions,
     };
     return { ...repository, problems };
+  }
+
+  async findOtherSolution(
+    repository: RepositorySnapshot,
+    slug: string,
+    nickname: string,
+    preferredExtension: string,
+    previousFileName?: string,
+  ): Promise<vscode.Uri | undefined> {
+    const problemUri = vscode.Uri.joinPath(vscode.Uri.parse(repository.rootUri), slug);
+    const fileNames = (await this.readDirectory(problemUri))
+      .filter(({ type }) => (type & vscode.FileType.File) !== 0)
+      .map(({ name }) => name);
+    const selected = selectRandomOtherSolution(
+      fileNames,
+      nickname,
+      preferredExtension,
+      previousFileName,
+    );
+    return selected ? vscode.Uri.joinPath(problemUri, selected) : undefined;
   }
 
   private async readDirectory(uri: vscode.Uri): Promise<DirectoryEntry[]> {

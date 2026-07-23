@@ -15,6 +15,7 @@ interface ProblemSnapshot {
   slug: string;
   week?: number;
   completed: boolean;
+  hasOtherSolutions: boolean;
   solutions: SolutionFileSnapshot[];
 }
 
@@ -115,6 +116,7 @@ suite('LeetCode Study Helper integration', () => {
     const twoSum = studyA?.problems.find(({ slug }) => slug === 'two-sum');
     assert.ok(twoSum);
     assert.equal(twoSum.week, 1);
+    assert.equal(twoSum.hasOtherSolutions, true);
     assert.deepEqual(
       twoSum.solutions.map(({ name }) => name),
       ['CaseUser.go.md', 'CaseUser.py'],
@@ -123,6 +125,30 @@ suite('LeetCode Study Helper integration', () => {
       twoSum.solutions.map(({ gitStatus }) => gitStatus),
       ['pushed', 'pushed'],
     );
+    assert.equal(
+      studyA?.problems.find(({ slug }) => slug === 'three-sum')?.hasOtherSolutions,
+      false,
+    );
+  });
+
+  test('opens another participant solution for the selected problem', async () => {
+    const state = await vscode.commands.executeCommand<ExtensionSnapshot>(
+      'leetcodeStudyHelper.__getState',
+    );
+    const studyA = state?.repositories.find(({ name }) => name === 'study-a');
+    assert.ok(studyA);
+
+    const opened = await vscode.commands.executeCommand<string>(
+      'leetcodeStudyHelper.__openOtherSolution',
+      studyA.rootUri,
+      'two-sum',
+    );
+
+    assert.equal(
+      opened,
+      vscode.Uri.joinPath(vscode.Uri.parse(studyA.rootUri), 'two-sum', 'caseuser.ts').toString(),
+    );
+    assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), opened);
   });
 
   test('tracks only the active solution belonging to the configured nickname', async () => {
