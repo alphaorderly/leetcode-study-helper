@@ -119,11 +119,11 @@ suite('LeetCode Study Helper integration', () => {
     assert.equal(twoSum.hasOtherSolutions, true);
     assert.deepEqual(
       twoSum.solutions.map(({ name }) => name),
-      ['CaseUser.go.md', 'CaseUser.py'],
+      ['CaseUser.go.md', 'CaseUser.js', 'CaseUser.py'],
     );
     assert.deepEqual(
       twoSum.solutions.map(({ gitStatus }) => gitStatus),
-      ['pushed', 'pushed'],
+      ['pushed', 'pushed', 'pushed'],
     );
     assert.equal(
       studyA?.problems.find(({ slug }) => slug === 'three-sum')?.hasOtherSolutions,
@@ -361,7 +361,7 @@ suite('LeetCode Study Helper integration', () => {
     const result = await vscode.commands.executeCommand<LineLintFixResult>(
       'leetcodeStudyHelper.__fixAllSolutions',
     );
-    assert.deepEqual(result, { checked: 2, fixed: 1, ignored: 1 });
+    assert.deepEqual(result, { checked: 3, fixed: 1, ignored: 1 });
     assert.equal(
       Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.parse(python.uri))).toString(),
       'answer\n',

@@ -117,7 +117,18 @@ describe('webview rendering', () => {
     expect(root.textContent).not.toContain('CaseUser.py');
     expect(root.textContent).toContain('origin');
     expect(root.textContent).not.toContain('CaseUser.ts');
-    expect(root.querySelectorAll('.solution-button')).toHaveLength(0);
+    const solutionButtons = [
+      ...root.querySelectorAll<HTMLButtonElement>('.solution-button'),
+    ];
+    expect(solutionButtons.map(({ textContent }) => textContent)).toEqual(['.py', '.ts']);
+    expect(solutionButtons[0]?.title).toBe('CaseUser.py 열기');
+    expect(solutionButtons[0]?.getAttribute('aria-current')).toBe('true');
+    expect(solutionButtons[1]?.title).toBe('CaseUser.ts 열기');
+    expect(solutionButtons[1]?.hasAttribute('aria-current')).toBe(false);
+    expect(root.querySelector('.solution-file-label')?.textContent).toBe('다른 언어 풀이');
+    expect(root.querySelector('.solution-file-buttons')?.getAttribute('role')).toBe('group');
+    expect(root.querySelector('.solution-file-buttons')?.getAttribute('aria-label'))
+      .toBe('Two Sum 풀이 파일');
     expect(root.querySelectorAll('.solution-status.has-file')).toHaveLength(1);
     expect(root.querySelectorAll('.solution-status.no-file')).toHaveLength(1);
     expect(root.querySelector('.solution-git-status.pushed')).not.toBeNull();
@@ -129,7 +140,8 @@ describe('webview rendering', () => {
     expect((root.querySelector(
       '.problem-card.incomplete .other-solution-button',
     ) as HTMLButtonElement).disabled).toBe(true);
-    expect(root.querySelector('.other-solution-button')?.textContent).toBe('다른 풀이');
+    expect(root.querySelectorAll('.other-solution-button .users-round-icon')).toHaveLength(2);
+    expect(root.querySelector('.other-solution-button')?.textContent).toBe('');
     expect(root.querySelector('.other-solution-button')?.getAttribute('aria-label'))
       .toBe('Two Sum 다른 참여자의 풀이 열기');
     expect(root.querySelectorAll('.open-page-button')).toHaveLength(2);
@@ -142,7 +154,9 @@ describe('webview rendering', () => {
     expect(root.querySelectorAll('.delete-button .trash-icon')).toHaveLength(1);
     expect(root.querySelector('.delete-button')?.textContent).toBe('');
     expect((root.querySelector('.delete-button') as HTMLButtonElement).title)
-      .toBe('풀이 파일 삭제');
+      .toBe('CaseUser.py 삭제');
+    expect(root.querySelector('.delete-button')?.getAttribute('aria-label'))
+      .toBe('CaseUser.py 풀이 파일 삭제');
     expect(root.querySelectorAll('.file-icon')).toHaveLength(1);
     expect(root.querySelectorAll('.problem-group.week')).toHaveLength(2);
     expect(root.querySelector('.stats')).toBeNull();
@@ -162,6 +176,65 @@ describe('webview rendering', () => {
     expect(currentProblemButton?.title).toContain('풀이 파일을 열면');
     expect(root.textContent).not.toContain('제출 파일 라인린트');
     expect(root.textContent).not.toContain('*.md는 제외됩니다.');
+  });
+
+  it('orders solution buttons by the configured language and disables them while busy', () => {
+    ui.busy = true;
+    renderApp(root, { ...snapshot, preferredLanguage: 'typescript' }, ui, vi.fn());
+
+    const solutionButtons = [
+      ...root.querySelectorAll<HTMLButtonElement>('.solution-button'),
+    ];
+    expect(solutionButtons.map(({ textContent }) => textContent)).toEqual(['.ts', '.py']);
+    expect(solutionButtons[0]?.getAttribute('aria-current')).toBe('true');
+    expect(solutionButtons[0]?.getAttribute('aria-label'))
+      .toBe('CaseUser.ts 풀이 파일 열기');
+    expect(solutionButtons.every(({ disabled }) => disabled)).toBe(true);
+  });
+
+  it('hides solution buttons for a single code file and Markdown companions', () => {
+    const singleSolution = snapshot.repositories[0]!.problems[0]!.solutions[1]!;
+    const markdownSolution = {
+      name: 'CaseUser.go.md',
+      uri: 'file:///study-a/two-sum/CaseUser.go.md',
+      gitStatus: 'pushed' as const,
+    };
+    renderApp(
+      root,
+      {
+        ...snapshot,
+        repositories: snapshot.repositories.map((repository) => ({
+          ...repository,
+          problems: repository.problems.map((problem) =>
+            problem.slug === 'two-sum'
+              ? { ...problem, solutions: [singleSolution, markdownSolution] }
+              : problem,
+          ),
+        })),
+      },
+      ui,
+      vi.fn(),
+    );
+
+    expect(root.querySelector('.solution-file-buttons')).toBeNull();
+    expect(root.querySelector('.solution-button')).toBeNull();
+  });
+
+  it('does not open the preferred solution from the separated solution area', () => {
+    const post = vi.fn();
+    renderApp(root, snapshot, ui, post);
+
+    (root.querySelector('.solution-file-section') as HTMLElement).click();
+    (root.querySelector('.solution-file-label') as HTMLElement).click();
+    expect(post).not.toHaveBeenCalled();
+
+    const typeScriptButton = [...root.querySelectorAll<HTMLButtonElement>('.solution-button')]
+      .find(({ textContent }) => textContent === '.ts');
+    typeScriptButton?.click();
+    expect(post).toHaveBeenCalledExactlyOnceWith({
+      type: 'openSolution',
+      uri: 'file:///study-a/two-sum/CaseUser.ts',
+    });
   });
 
   it('keeps the shell and list DOM stable for current-problem patches', () => {
@@ -491,6 +564,9 @@ describe('webview rendering', () => {
     (root.querySelector(
       '.problem-card.completed .other-solution-button',
     ) as HTMLButtonElement).click();
+    const solutionButtons = root.querySelectorAll<HTMLButtonElement>('.solution-button');
+    solutionButtons[0]?.click();
+    solutionButtons[1]?.click();
     (root.querySelector('.delete-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.completed .open-page-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.incomplete .problem-card-action') as HTMLButtonElement).click();
@@ -514,6 +590,24 @@ describe('webview rendering', () => {
       slug: 'two-sum',
     });
     expect(post).toHaveBeenCalledWith({
+      type: 'openSolution',
+      uri: 'file:///study-a/two-sum/CaseUser.py',
+    });
+    expect(post).toHaveBeenCalledWith({
+      type: 'openSolution',
+      uri: 'file:///study-a/two-sum/CaseUser.ts',
+    });
+    expect(
+      post.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.type === 'openSolution')
+        .map(({ uri }) => uri),
+    ).toEqual([
+      'file:///study-a/two-sum/CaseUser.py',
+      'file:///study-a/two-sum/CaseUser.py',
+      'file:///study-a/two-sum/CaseUser.ts',
+    ]);
+    expect(post).toHaveBeenCalledWith({
       type: 'deleteSolution',
       uri: 'file:///study-a/two-sum/CaseUser.py',
     });
@@ -530,7 +624,7 @@ describe('webview rendering', () => {
       type: 'openProblem',
       slug: 'three-sum',
     });
-    expect(post).toHaveBeenCalledTimes(8);
+    expect(post).toHaveBeenCalledTimes(10);
   });
 
   it('filters by status and search text', () => {

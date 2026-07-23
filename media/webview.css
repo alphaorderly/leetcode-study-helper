@@ -169,6 +169,7 @@ button:focus-visible {
 .secondary-button,
 .problem-page-button,
 .other-solution-button,
+.solution-button,
 .delete-button,
 .open-page-button,
 .filter-button,
@@ -709,6 +710,7 @@ button:disabled {
 }
 
 .delete-button,
+.other-solution-button,
 .open-page-button {
   display: inline-flex;
   align-items: center;
@@ -720,13 +722,53 @@ button:disabled {
   border-radius: 2px;
 }
 
-.other-solution-button {
+.solution-file-section {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 5px;
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px solid var(--ui-border);
+  pointer-events: auto;
+}
+
+.solution-file-label {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.78em;
+  font-weight: 600;
+}
+
+.solution-file-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.solution-button {
   min-height: 24px;
   padding: 2px 7px;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  border-color: var(--ui-border);
+  font-size: 0.84em;
   white-space: nowrap;
 }
 
+.solution-button.preferred {
+  color: var(--vscode-foreground);
+  background: var(--ui-surface-muted);
+  border-color: var(--ui-border-strong);
+}
+
+.solution-button:hover:not(:disabled) {
+  color: var(--vscode-foreground);
+  background: var(--ui-surface-hover);
+  border-color: var(--ui-border-strong);
+}
+
 .trash-icon,
+.users-round-icon,
 .external-link-icon {
   width: 14px;
   height: 14px;

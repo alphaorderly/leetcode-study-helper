@@ -110,6 +110,32 @@ function trashIcon(): SVGSVGElement {
   return icon;
 }
 
+function usersRoundIcon(): SVGSVGElement {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.classList.add('users-round-icon');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('fill', 'none');
+  icon.setAttribute('stroke', 'currentColor');
+  icon.setAttribute('stroke-width', '2');
+  icon.setAttribute('stroke-linecap', 'round');
+  icon.setAttribute('stroke-linejoin', 'round');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.setAttribute('focusable', 'false');
+
+  const primaryUser = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  primaryUser.setAttribute('cx', '10');
+  primaryUser.setAttribute('cy', '8');
+  primaryUser.setAttribute('r', '4');
+
+  const group = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  group.setAttribute(
+    'd',
+    'M2 21a8 8 0 0 1 16 0M17 3.13a4 4 0 0 1 0 7.75M22 21a8 8 0 0 0-5-7.44',
+  );
+  icon.append(primaryUser, group);
+  return icon;
+}
+
 function renderSettings(
   state: ExtensionSnapshot,
   ui: UiState,
@@ -317,6 +343,64 @@ function creationHint(state: ExtensionSnapshot): string {
   return '카드를 눌러 생성';
 }
 
+function solutionExtension(fileName: string): string {
+  const lastDot = fileName.lastIndexOf('.');
+  return lastDot === -1 ? fileName : fileName.slice(lastDot);
+}
+
+function renderSolutionSection(
+  problem: ProblemSnapshot,
+  preferred: ProblemSnapshot['solutions'][number] | undefined,
+  problemTitle: string,
+  ui: UiState,
+  post: PostMessage,
+): HTMLElement | undefined {
+  const codeSolutions = problem.solutions
+    .filter(({ name }) => !name.endsWith('.md'))
+    .sort((left, right) => {
+      if (left.uri === preferred?.uri) {
+        return -1;
+      }
+      if (right.uri === preferred?.uri) {
+        return 1;
+      }
+      return left.name.localeCompare(right.name);
+    });
+  if (codeSolutions.length < 2) {
+    return undefined;
+  }
+
+  const section = element('div', 'solution-file-section');
+  section.addEventListener('click', (event) => event.stopPropagation());
+  section.append(element('span', 'solution-file-label', '다른 언어 풀이'));
+
+  const buttons = element('div', 'solution-file-buttons');
+  buttons.setAttribute('role', 'group');
+  buttons.setAttribute('aria-label', `${problemTitle} 풀이 파일`);
+  for (const codeSolution of codeSolutions) {
+    const isPreferred = codeSolution.uri === preferred?.uri;
+    const button = element(
+      'button',
+      `solution-button${isPreferred ? ' preferred' : ''}`,
+      solutionExtension(codeSolution.name),
+    );
+    button.type = 'button';
+    button.title = `${codeSolution.name} 열기`;
+    button.setAttribute('aria-label', `${codeSolution.name} 풀이 파일 열기`);
+    if (isPreferred) {
+      button.setAttribute('aria-current', 'true');
+    }
+    button.disabled = ui.busy;
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      post({ type: 'openSolution', uri: codeSolution.uri });
+    });
+    buttons.append(button);
+  }
+  section.append(buttons);
+  return section;
+}
+
 function renderProblem(
   problem: ProblemSnapshot,
   repository: RepositorySnapshot,
@@ -362,11 +446,7 @@ function renderProblem(
 
   const actions = element('div', 'solution-actions');
   const actionButtons = element('div', 'solution-action-buttons');
-  const otherSolutionButton = element(
-    'button',
-    'other-solution-button',
-    '다른 풀이',
-  );
+  const otherSolutionButton = element('button', 'other-solution-button');
   otherSolutionButton.type = 'button';
   otherSolutionButton.setAttribute(
     'aria-label',
@@ -380,6 +460,7 @@ function renderProblem(
   } else {
     otherSolutionButton.title = '다른 참여자의 풀이 열기';
   }
+  otherSolutionButton.append(usersRoundIcon());
   otherSolutionButton.addEventListener('click', (event) => {
     event.stopPropagation();
     post({
@@ -403,11 +484,11 @@ function renderProblem(
     );
     const deleteButton = element('button', 'delete-button');
     deleteButton.type = 'button';
-    deleteButton.setAttribute('aria-label', '풀이 파일 삭제');
-    deleteButton.title = '풀이 파일 삭제';
+    deleteButton.setAttribute('aria-label', `${solution.name} 풀이 파일 삭제`);
+    deleteButton.title = `${solution.name} 삭제`;
     deleteButton.disabled = ui.busy || !state.workspaceTrusted;
     if (!state.workspaceTrusted) {
-      deleteButton.title = '파일을 삭제하려면 워크스페이스를 신뢰해야 합니다.';
+      deleteButton.title = `${solution.name} 파일을 삭제하려면 워크스페이스를 신뢰해야 합니다.`;
     }
     deleteButton.append(trashIcon());
     deleteButton.addEventListener('click', (event) => {
@@ -440,6 +521,10 @@ function renderProblem(
   actions.append(actionButtons);
   card.prepend(cardAction);
   card.append(actions);
+  const solutionSection = renderSolutionSection(problem, solution, problemTitle, ui, post);
+  if (solutionSection) {
+    card.append(solutionSection);
+  }
   return card;
 }
 
