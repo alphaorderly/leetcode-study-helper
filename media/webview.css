@@ -169,6 +169,7 @@ button:focus-visible {
 .secondary-button,
 .problem-page-button,
 .other-solution-button,
+.answer-button,
 .solution-button,
 .delete-button,
 .open-page-button,
@@ -711,8 +712,10 @@ button:disabled {
 
 .delete-button,
 .other-solution-button,
+.answer-button,
 .open-page-button {
   display: inline-flex;
+  position: relative;
   align-items: center;
   justify-content: center;
   width: 24px;
@@ -769,6 +772,7 @@ button:disabled {
 
 .trash-icon,
 .users-round-icon,
+.book-open-icon,
 .external-link-icon {
   width: 14px;
   height: 14px;
@@ -855,8 +859,40 @@ button:disabled {
   pointer-events: auto;
 }
 
+.solution-action-buttons [data-tooltip]::after {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  bottom: calc(100% + 5px);
+  width: max-content;
+  max-width: 220px;
+  padding: 4px 6px;
+  visibility: hidden;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 2px;
+  opacity: 0;
+  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  background: var(--vscode-editorHoverWidget-background, var(--ui-surface));
+  box-shadow: 0 2px 7px rgb(0 0 0 / 22%);
+  content: attr(data-tooltip);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  pointer-events: none;
+  text-align: left;
+  white-space: normal;
+  transition: opacity 100ms ease, visibility 100ms ease;
+}
+
+.solution-action-buttons [data-tooltip]:hover::after,
+.solution-action-buttons [data-tooltip]:focus-visible::after {
+  visibility: visible;
+  opacity: 1;
+}
+
 .delete-button,
 .other-solution-button,
+.answer-button,
 .open-page-button {
   color: var(--vscode-descriptionForeground);
   background: transparent;
@@ -865,6 +901,7 @@ button:disabled {
 
 .delete-button:hover:not(:disabled),
 .other-solution-button:hover:not(:disabled),
+.answer-button:hover:not(:disabled),
 .open-page-button:hover:not(:disabled) {
   color: var(--vscode-foreground);
   background: var(--ui-surface-hover);

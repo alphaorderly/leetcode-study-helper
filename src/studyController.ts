@@ -1,5 +1,10 @@
 import * as vscode from 'vscode';
 import { CurrentProblemSession } from './currentProblemSession';
+import {
+  ANSWER_CONFIRM_LABEL,
+  confirmAnswerAccess,
+  normalizeAnswerUrl,
+} from './core/answerLinks';
 import { DEFAULT_LANGUAGE, findLanguage, LANGUAGE_OPTIONS } from './core/languages';
 import {
   confirmOtherSolutionAccess,
@@ -212,6 +217,39 @@ export class StudyController implements vscode.Disposable {
     if (!await vscode.env.openExternal(problemUri)) {
       throw new Error('LeetCode 문제 페이지를 열지 못했습니다.');
     }
+  }
+
+  async openAnswer(
+    rootUri: string,
+    slug: string,
+    confirm = true,
+  ): Promise<boolean> {
+    const repository = this.snapshot.repositories.find((item) => item.rootUri === rootUri);
+    const problem = repository?.problems.find((item) => item.slug === slug);
+    if (!repository || !problem) {
+      throw new Error('요청한 문제가 현재 워크스페이스에 없습니다.');
+    }
+
+    const answerUrl = problem.solutionUrl
+      ? normalizeAnswerUrl(problem.solutionUrl)
+      : undefined;
+    if (!answerUrl) {
+      throw new Error('README.md에서 유효한 정답 URL을 찾을 수 없습니다.');
+    }
+
+    if (confirm && !await confirmAnswerAccess(() =>
+      vscode.window.showWarningMessage(
+        '정답으로 이동합니다.',
+        { modal: true },
+        ANSWER_CONFIRM_LABEL,
+      ))) {
+      return false;
+    }
+
+    if (!await vscode.env.openExternal(vscode.Uri.parse(answerUrl))) {
+      throw new Error('정답 페이지를 열지 못했습니다.');
+    }
+    return true;
   }
 
   async loadCurrentProblem(): Promise<void> {
@@ -526,6 +564,11 @@ export class StudyController implements vscode.Disposable {
         new vscode.RelativePattern(folder, '*/*'),
       );
       solutionWatcher.onDidCreate((uri) => this.scheduleProblemRefresh(folder, uri));
+      solutionWatcher.onDidChange((uri) => {
+        if (uri.path.endsWith('/README.md')) {
+          this.scheduleProblemRefresh(folder, uri);
+        }
+      });
       solutionWatcher.onDidDelete((uri) => this.scheduleProblemRefresh(folder, uri));
       this.watchers.push(catalogWatcher, solutionWatcher);
     }

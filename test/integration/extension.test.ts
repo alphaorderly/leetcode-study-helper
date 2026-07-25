@@ -14,6 +14,7 @@ interface SolutionFileSnapshot {
 interface ProblemSnapshot {
   slug: string;
   week?: number;
+  solutionUrl?: string;
   completed: boolean;
   hasOtherSolutions: boolean;
   solutions: SolutionFileSnapshot[];
@@ -116,6 +117,10 @@ suite('LeetCode Study Helper integration', () => {
     const twoSum = studyA?.problems.find(({ slug }) => slug === 'two-sum');
     assert.ok(twoSum);
     assert.equal(twoSum.week, 1);
+    assert.equal(
+      twoSum.solutionUrl,
+      'https://www.algodale.com/problems/two-sum/',
+    );
     assert.equal(twoSum.hasOtherSolutions, true);
     assert.deepEqual(
       twoSum.solutions.map(({ name }) => name),
@@ -129,6 +134,58 @@ suite('LeetCode Study Helper integration', () => {
       studyA?.problems.find(({ slug }) => slug === 'three-sum')?.hasOtherSolutions,
       false,
     );
+    assert.equal(
+      state.repositories
+        .find(({ name }) => name === 'study-b')
+        ?.problems.find(({ slug }) => slug === 'valid-anagram')
+        ?.solutionUrl,
+      'https://www.algodale.com/problems/valid-anagram/',
+    );
+  });
+
+  test('refreshes an answer URL when a problem README changes', async () => {
+    const state = await vscode.commands.executeCommand<ExtensionSnapshot>(
+      'leetcodeStudyHelper.__getState',
+    );
+    const studyA = state?.repositories.find(({ name }) => name === 'study-a');
+    assert.ok(studyA);
+    const readmeUri = vscode.Uri.joinPath(
+      vscode.Uri.parse(studyA.rootUri),
+      'two-sum',
+      'README.md',
+    );
+    const original = await vscode.workspace.fs.readFile(readmeUri);
+    const changedUrl = 'https://www.algodale.com/problems/two-sum-updated/';
+
+    try {
+      await vscode.workspace.fs.writeFile(
+        readmeUri,
+        new TextEncoder().encode(
+          `- 문제: https://leetcode.com/problems/two-sum/\n- 풀이: ${changedUrl}\n`,
+        ),
+      );
+      const changed = await waitForState((current) =>
+        current.repositories
+          .find(({ name }) => name === 'study-a')
+          ?.problems.find(({ slug }) => slug === 'two-sum')
+          ?.solutionUrl === changedUrl,
+      );
+      assert.equal(
+        changed.repositories
+          .find(({ name }) => name === 'study-a')
+          ?.problems.find(({ slug }) => slug === 'two-sum')
+          ?.solutionUrl,
+        changedUrl,
+      );
+    } finally {
+      await vscode.workspace.fs.writeFile(readmeUri, original);
+      await waitForState((current) =>
+        current.repositories
+          .find(({ name }) => name === 'study-a')
+          ?.problems.find(({ slug }) => slug === 'two-sum')
+          ?.solutionUrl === 'https://www.algodale.com/problems/two-sum/',
+      );
+    }
   });
 
   test('opens another participant solution for the selected problem', async () => {

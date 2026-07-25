@@ -136,6 +136,38 @@ function usersRoundIcon(): SVGSVGElement {
   return icon;
 }
 
+function bookOpenIcon(): SVGSVGElement {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.classList.add('book-open-icon');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('fill', 'none');
+  icon.setAttribute('stroke', 'currentColor');
+  icon.setAttribute('stroke-width', '2');
+  icon.setAttribute('stroke-linecap', 'round');
+  icon.setAttribute('stroke-linejoin', 'round');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.setAttribute('focusable', 'false');
+
+  const center = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  center.setAttribute('d', 'M12 7v14');
+  const leftPage = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  leftPage.setAttribute(
+    'd',
+    'M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3Z',
+  );
+  const rightPage = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  rightPage.setAttribute(
+    'd',
+    'M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3v15a3 3 0 0 1 3-3Z',
+  );
+  icon.append(center, leftPage, rightPage);
+  return icon;
+}
+
+function setButtonTooltip(button: HTMLButtonElement, text: string): void {
+  button.dataset.tooltip = text;
+}
+
 function renderSettings(
   state: ExtensionSnapshot,
   ui: UiState,
@@ -454,11 +486,11 @@ function renderProblem(
   );
   otherSolutionButton.disabled = ui.busy || !state.nickname || !problem.hasOtherSolutions;
   if (!state.nickname) {
-    otherSolutionButton.title = '닉네임 설정 후 사용할 수 있습니다.';
+    setButtonTooltip(otherSolutionButton, '닉네임 설정 후 사용할 수 있습니다.');
   } else if (!problem.hasOtherSolutions) {
-    otherSolutionButton.title = '다른 참여자의 풀이가 없습니다.';
+    setButtonTooltip(otherSolutionButton, '다른 참여자의 풀이가 없습니다.');
   } else {
-    otherSolutionButton.title = '다른 참여자의 풀이 열기';
+    setButtonTooltip(otherSolutionButton, '다른 참여자의 풀이 열기');
   }
   otherSolutionButton.append(usersRoundIcon());
   otherSolutionButton.addEventListener('click', (event) => {
@@ -485,10 +517,13 @@ function renderProblem(
     const deleteButton = element('button', 'delete-button');
     deleteButton.type = 'button';
     deleteButton.setAttribute('aria-label', `${solution.name} 풀이 파일 삭제`);
-    deleteButton.title = `${solution.name} 삭제`;
+    setButtonTooltip(deleteButton, `${solution.name} 삭제`);
     deleteButton.disabled = ui.busy || !state.workspaceTrusted;
     if (!state.workspaceTrusted) {
-      deleteButton.title = `${solution.name} 파일을 삭제하려면 워크스페이스를 신뢰해야 합니다.`;
+      setButtonTooltip(
+        deleteButton,
+        `${solution.name} 파일을 삭제하려면 워크스페이스를 신뢰해야 합니다.`,
+      );
     }
     deleteButton.append(trashIcon());
     deleteButton.addEventListener('click', (event) => {
@@ -507,9 +542,29 @@ function renderProblem(
     status.append(statusCopy);
     actions.append(status);
   }
+  const answerButton = element('button', 'answer-button');
+  answerButton.type = 'button';
+  answerButton.setAttribute('aria-label', `${problemTitle} 정답 페이지 열기`);
+  answerButton.disabled = ui.busy || !problem.solutionUrl;
+  setButtonTooltip(
+    answerButton,
+    problem.solutionUrl
+      ? '정답 페이지 열기'
+      : 'README.md에서 정답 URL을 찾을 수 없습니다.',
+  );
+  answerButton.append(bookOpenIcon());
+  answerButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    post({
+      type: 'openAnswer',
+      rootUri: repository.rootUri,
+      slug: problem.slug,
+    });
+  });
+  actionButtons.append(answerButton);
   const openPageButton = element('button', 'open-page-button');
   openPageButton.type = 'button';
-  openPageButton.title = 'LeetCode 페이지 열기';
+  setButtonTooltip(openPageButton, 'LeetCode 페이지 열기');
   openPageButton.setAttribute('aria-label', `${problemTitle} LeetCode 페이지 열기`);
   openPageButton.disabled = ui.busy;
   openPageButton.append(externalLinkIcon());

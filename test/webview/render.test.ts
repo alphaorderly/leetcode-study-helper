@@ -25,6 +25,7 @@ const snapshot: ExtensionSnapshot = {
           categories: ['Array'],
           blindCategories: ['Array'],
           intendedApproach: 'Use a hash map.',
+          solutionUrl: 'https://www.algodale.com/problems/two-sum/',
           completed: true,
           hasOtherSolutions: true,
           solutions: [
@@ -47,6 +48,7 @@ const snapshot: ExtensionSnapshot = {
           categories: ['Array', 'Two Pointers'],
           blindCategories: ['Array'],
           intendedApproach: 'Sort and use two pointers.',
+          solutionUrl: 'https://www.algodale.com/problems/3sum/',
           completed: false,
           hasOtherSolutions: false,
           solutions: [],
@@ -144,16 +146,27 @@ describe('webview rendering', () => {
     expect(root.querySelector('.other-solution-button')?.textContent).toBe('');
     expect(root.querySelector('.other-solution-button')?.getAttribute('aria-label'))
       .toBe('Two Sum 다른 참여자의 풀이 열기');
+    expect((root.querySelector('.other-solution-button') as HTMLButtonElement).dataset.tooltip)
+      .toBe('다른 참여자의 풀이 열기');
+    expect(root.querySelectorAll('.answer-button')).toHaveLength(2);
+    expect([...root.querySelectorAll<HTMLButtonElement>('.answer-button')]
+      .every(({ disabled }) => !disabled)).toBe(true);
+    expect(root.querySelector('.answer-button')?.textContent).toBe('');
+    expect(root.querySelectorAll('.answer-button .book-open-icon')).toHaveLength(2);
+    expect((root.querySelector('.answer-button') as HTMLButtonElement).dataset.tooltip)
+      .toBe('정답 페이지 열기');
+    expect(root.querySelector('.answer-button')?.getAttribute('aria-label'))
+      .toBe('Two Sum 정답 페이지 열기');
     expect(root.querySelectorAll('.open-page-button')).toHaveLength(2);
     expect(root.querySelectorAll('.open-page-button .external-link-icon')).toHaveLength(2);
     expect(root.querySelector('.open-page-button')?.textContent).toBe('');
-    expect((root.querySelector('.open-page-button') as HTMLButtonElement).title)
+    expect((root.querySelector('.open-page-button') as HTMLButtonElement).dataset.tooltip)
       .toBe('LeetCode 페이지 열기');
     expect(root.querySelector('.open-page-button')?.getAttribute('aria-label'))
       .toBe('Two Sum LeetCode 페이지 열기');
     expect(root.querySelectorAll('.delete-button .trash-icon')).toHaveLength(1);
     expect(root.querySelector('.delete-button')?.textContent).toBe('');
-    expect((root.querySelector('.delete-button') as HTMLButtonElement).title)
+    expect((root.querySelector('.delete-button') as HTMLButtonElement).dataset.tooltip)
       .toBe('CaseUser.py 삭제');
     expect(root.querySelector('.delete-button')?.getAttribute('aria-label'))
       .toBe('CaseUser.py 풀이 파일 삭제');
@@ -235,6 +248,31 @@ describe('webview rendering', () => {
       type: 'openSolution',
       uri: 'file:///study-a/two-sum/CaseUser.ts',
     });
+  });
+
+  it('disables the answer button when the README has no valid answer URL', () => {
+    renderApp(
+      root,
+      {
+        ...snapshot,
+        repositories: snapshot.repositories.map((repository) => ({
+          ...repository,
+          problems: repository.problems.map((problem) =>
+            problem.slug === 'two-sum'
+              ? { ...problem, solutionUrl: undefined }
+              : problem,
+          ),
+        })),
+      },
+      ui,
+      vi.fn(),
+    );
+
+    const button = root.querySelector(
+      '.problem-card.completed .answer-button',
+    ) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.dataset.tooltip).toBe('README.md에서 정답 URL을 찾을 수 없습니다.');
   });
 
   it('keeps the shell and list DOM stable for current-problem patches', () => {
@@ -568,8 +606,10 @@ describe('webview rendering', () => {
     solutionButtons[0]?.click();
     solutionButtons[1]?.click();
     (root.querySelector('.delete-button') as HTMLButtonElement).click();
+    (root.querySelector('.problem-card.completed .answer-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.completed .open-page-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.incomplete .problem-card-action') as HTMLButtonElement).click();
+    (root.querySelector('.problem-card.incomplete .answer-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.incomplete .open-page-button') as HTMLButtonElement).click();
 
     expect(post).toHaveBeenCalledWith({
@@ -616,6 +656,11 @@ describe('webview rendering', () => {
       slug: 'two-sum',
     });
     expect(post).toHaveBeenCalledWith({
+      type: 'openAnswer',
+      rootUri: 'file:///study-a',
+      slug: 'two-sum',
+    });
+    expect(post).toHaveBeenCalledWith({
       type: 'createSolution',
       rootUri: 'file:///study-a',
       slug: 'three-sum',
@@ -624,7 +669,12 @@ describe('webview rendering', () => {
       type: 'openProblem',
       slug: 'three-sum',
     });
-    expect(post).toHaveBeenCalledTimes(10);
+    expect(post).toHaveBeenCalledWith({
+      type: 'openAnswer',
+      rootUri: 'file:///study-a',
+      slug: 'three-sum',
+    });
+    expect(post).toHaveBeenCalledTimes(12);
   });
 
   it('filters by status and search text', () => {
@@ -831,7 +881,7 @@ describe('webview rendering', () => {
     expect(root.querySelector('.problem-card.incomplete .solution-status')?.textContent)
       .toBe('풀이 없음워크스페이스 신뢰 후 생성');
     expect(deleteButton.disabled).toBe(true);
-    expect(deleteButton.title).toContain('워크스페이스를 신뢰');
+    expect(deleteButton.dataset.tooltip).toContain('워크스페이스를 신뢰');
     expect((root.querySelector('.lint-button') as HTMLButtonElement).disabled).toBe(true);
     expect(root.querySelector('.solution-create-hint')?.textContent)
       .toBe('워크스페이스 신뢰 후 생성');

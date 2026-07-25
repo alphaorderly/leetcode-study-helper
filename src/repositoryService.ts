@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { extractAnswerUrl } from './core/answerLinks';
 import { parseProblemCatalog } from './core/catalog';
 import {
   isOtherSolutionFile,
@@ -81,6 +82,7 @@ export class StudyRepositoryService {
       slugs.map(async (slug): Promise<ProblemSnapshot> => {
         const problemUri = vscode.Uri.joinPath(folder.uri, slug);
         const entries = await this.readDirectory(problemUri);
+        const solutionUrl = await this.readAnswerUrl(problemUri);
         const fileNames = entries
           .filter(({ type }) => (type & vscode.FileType.File) !== 0)
           .map(({ name }) => name);
@@ -96,6 +98,7 @@ export class StudyRepositoryService {
         return {
           slug,
           week: getProblemWeek(slug),
+          solutionUrl,
           ...catalog[slug]!,
           completed: solutions.length > 0,
           hasOtherSolutions: fileNames.some(
@@ -124,6 +127,7 @@ export class StudyRepositoryService {
     }
 
     const problemUri = vscode.Uri.joinPath(vscode.Uri.parse(repository.rootUri), slug);
+    const solutionUrl = await this.readAnswerUrl(problemUri);
     const fileNames = (await this.readDirectory(problemUri))
       .filter(({ type }) => (type & vscode.FileType.File) !== 0)
       .map(({ name }) => name);
@@ -138,6 +142,7 @@ export class StudyRepositoryService {
     const problems = [...repository.problems];
     problems[problemIndex] = {
       ...problems[problemIndex]!,
+      solutionUrl,
       completed: solutions.length > 0,
       hasOtherSolutions: fileNames.some(
         (name) => isOtherSolutionFile(name, nickname),
@@ -170,5 +175,19 @@ export class StudyRepositoryService {
   private async readDirectory(uri: vscode.Uri): Promise<DirectoryEntry[]> {
     const entries = await vscode.workspace.fs.readDirectory(uri);
     return entries.map(([name, type]) => ({ name, type }));
+  }
+
+  private async readAnswerUrl(problemUri: vscode.Uri): Promise<string | undefined> {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(
+        vscode.Uri.joinPath(problemUri, 'README.md'),
+      );
+      return extractAnswerUrl(new TextDecoder().decode(bytes));
+    } catch (error) {
+      if (isMissingFile(error)) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 }

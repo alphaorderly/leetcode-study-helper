@@ -18,6 +18,7 @@ export interface SolutionFileSnapshot {
 export interface ProblemSnapshot extends ProblemMetadata {
   slug: string;
   week?: number;
+  solutionUrl?: string;
   completed: boolean;
   hasOtherSolutions: boolean;
   solutions: SolutionFileSnapshot[];
@@ -136,6 +137,7 @@ export type WebviewToExtensionMessage =
   | { type: 'openSolution'; uri: string }
   | { type: 'openOtherSolution'; rootUri: string; slug: string }
   | { type: 'openProblem'; slug: string }
+  | { type: 'openAnswer'; rootUri: string; slug: string }
   | { type: 'loadCurrentProblem' }
   | { type: 'runCurrentSolution'; candidateId: string }
   | { type: 'deleteSolution'; uri: string }

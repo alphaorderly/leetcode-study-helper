@@ -16,6 +16,7 @@ const baseSnapshot: ExtensionSnapshot = {
       difficulty: 'Easy',
       categories: [],
       blindCategories: [],
+      solutionUrl: 'https://www.algodale.com/problems/two-sum/',
       completed: true,
       hasOtherSolutions: true,
       solutions: [{
