@@ -4,9 +4,22 @@
 
 이 확장의 목표는 [DaleStudy/leetcode-study](https://github.com/DaleStudy/leetcode-study) 스터디 저장소를 더 쉽고 빠르게 사용하는 것입니다. 75개 문제를 주차별로 탐색하고, 내 풀이 파일을 관리하고, Python 코드를 로컬에서 테스트한 뒤 주차별 PR로 제출할 수 있습니다.
 
-[상세 사용법 보기](USAGE.md) · [빠른 시작](#빠른-시작) · [설정](#설정)
+[설치](#설치) · [상세 사용법 보기](USAGE.md) · [빠른 시작](#빠른-시작) · [설정](#설정)
 
 ![문제 목록과 풀이 및 제출 상태를 보여 주는 리트코드 스터디 도우미 화면](media/readme/overview.png)
+
+## 설치
+
+사용하는 에디터에서 **확장 프로그램** 보기를 열고 `리트코드 스터디 도우미`를 검색해 설치합니다.
+
+- VS Code: [Visual Studio Marketplace에서 보기](https://marketplace.visualstudio.com/items?itemName=alphaorderly.leetcode-study-helper)
+- Cursor·VSCodium 등 Open VSX 사용 에디터: [Open VSX에서 보기](https://open-vsx.org/extension/alphaorderly/leetcode-study-helper)
+
+검색 결과에 바로 나타나지 않으면 정확한 확장 ID를 입력하세요.
+
+```text
+@id:alphaorderly.leetcode-study-helper
+```
 
 ## 사용법
 
@@ -39,12 +52,13 @@
 
 ## 빠른 시작
 
-1. [DaleStudy/leetcode-study](https://github.com/DaleStudy/leetcode-study)를 포크하고 로컬에 클론합니다.
-2. `problem-categories.json`과 문제 폴더가 있는 저장소를 VS Code로 엽니다.
-3. 활동 표시줄에서 **리트코드 스터디 도우미** 아이콘을 선택합니다.
-4. 제출 파일명에 사용하는 닉네임과 기본 언어를 입력하고 **적용**을 누릅니다.
-5. 문제 카드를 눌러 기존 풀이를 열거나 새 풀이 파일을 만듭니다.
-6. 풀이를 작성한 뒤 **현재 문제 보기**에서 테스트하고, **제출** 탭에서 커밋·push·PR 흐름을 진행합니다.
+1. 에디터의 확장 프로그램 스토어에서 `리트코드 스터디 도우미`를 검색해 설치합니다.
+2. [DaleStudy/leetcode-study](https://github.com/DaleStudy/leetcode-study)를 포크하고 로컬에 클론합니다.
+3. `problem-categories.json`과 문제 폴더가 있는 저장소를 에디터로 엽니다.
+4. 활동 표시줄에서 **리트코드 스터디 도우미** 아이콘을 선택합니다.
+5. 제출 파일명에 사용하는 닉네임과 기본 언어를 입력하고 **적용**을 누릅니다.
+6. 문제 카드를 눌러 기존 풀이를 열거나 새 풀이 파일을 만듭니다.
+7. 풀이를 작성한 뒤 **현재 문제 보기**에서 테스트하고, **제출** 탭에서 커밋·push·PR 흐름을 진행합니다.
 
 닉네임은 파일명의 첫 번째 점 앞부분과 대소문자까지 정확히 비교합니다. 예를 들어 `study-user`는 `study-user.py`와 일치하지만 `Study-User.py`와는 일치하지 않습니다.
 

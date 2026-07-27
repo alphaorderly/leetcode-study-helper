@@ -20,13 +20,28 @@
 
 ### 필요한 환경
 
-- VS Code `1.100.0` 이상
+- VS Code `1.100.0` 이상 또는 해당 API와 호환되는 에디터
 - [DaleStudy/leetcode-study](https://github.com/DaleStudy/leetcode-study)의 포크
 - 포크를 클론한 로컬 워크스페이스
 - 파일 생성, 테스트와 Git 기능을 사용할 경우 신뢰된 워크스페이스
 - Python 테스트를 사용할 경우 `python3` 또는 설정한 Python 실행 파일
 
-VSIX 파일로 설치한다면 VS Code 명령 팔레트에서 **Extensions: Install from VSIX...**를 실행하고 `.artifacts/leetcode-study-helper.vsix`를 선택합니다.
+### 확장 설치
+
+사용하는 에디터에서 **확장 프로그램** 보기를 열고 `리트코드 스터디 도우미`를 검색해 설치합니다.
+
+| 에디터 | 확장 프로그램 스토어 |
+| --- | --- |
+| VS Code | [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=alphaorderly.leetcode-study-helper) |
+| Cursor·VSCodium 등 Open VSX 사용 에디터 | [Open VSX](https://open-vsx.org/extension/alphaorderly/leetcode-study-helper) |
+
+검색 결과에 바로 나타나지 않으면 정확한 확장 ID로 검색하세요.
+
+```text
+@id:alphaorderly.leetcode-study-helper
+```
+
+직접 빌드한 VSIX 파일을 설치하려면 명령 팔레트에서 **Extensions: Install from VSIX...**를 실행하고 `.artifacts/leetcode-study-helper.vsix`를 선택합니다.
 
 ### 포크와 원격 저장소
 
