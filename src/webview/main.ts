@@ -16,6 +16,7 @@ const ui: UiState = {
   unpushedOnly: false,
   viewMode: 'list',
   busy: false,
+  commitMessages: {},
   ...vscode.getState(),
 };
 const renderer = root

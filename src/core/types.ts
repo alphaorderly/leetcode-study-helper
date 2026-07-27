@@ -9,10 +9,25 @@ export type ProblemCatalog = Record<string, ProblemMetadata>;
 
 export type SolutionGitStatus = 'checking' | 'pushed' | 'unpushed' | 'unknown';
 
+export type SolutionSubmissionStatus =
+  | 'checking'
+  | 'working'
+  | 'staged'
+  | 'staged-outdated'
+  | 'push-needed'
+  | 'pr-needed'
+  | 'pr-open'
+  | 'merged'
+  | 'sync-needed'
+  | 'conflict'
+  | 'unknown';
+
 export interface SolutionFileSnapshot {
   name: string;
   uri: string;
   gitStatus: SolutionGitStatus;
+  submissionStatus?: SolutionSubmissionStatus;
+  pullRequestNumber?: number;
 }
 
 export interface ProblemSnapshot extends ProblemMetadata {
@@ -29,6 +44,70 @@ export interface RepositorySnapshot {
   rootUri: string;
   gitRemote?: string;
   problems: ProblemSnapshot[];
+  submission?: RepositorySubmissionSnapshot;
+}
+
+export interface SubmissionFileSnapshot {
+  name: string;
+  uri: string;
+  relativePath: string;
+  slug: string;
+  week?: number;
+}
+
+export interface SubmissionCommitSnapshot {
+  hash: string;
+  shortHash: string;
+  message: string;
+  pushed: boolean;
+  files: SubmissionFileSnapshot[];
+  otherFiles: string[];
+}
+
+export interface PullRequestSnapshot {
+  number: number;
+  title: string;
+  url: string;
+  week?: number;
+}
+
+export type ForkVerificationStatus =
+  | 'checking'
+  | 'verified'
+  | 'unsupported'
+  | 'unavailable';
+
+export interface ForkIdentitySnapshot {
+  status: ForkVerificationStatus;
+  owner?: string;
+  repository?: string;
+  originUrl?: string;
+  reason?: string;
+}
+
+export interface SubmissionSummary {
+  working: number;
+  staged: number;
+  pushNeeded: number;
+  prPending: number;
+  merged: number;
+  unknown: number;
+}
+
+export interface RepositorySubmissionSnapshot {
+  status: 'checking' | 'ready' | 'unsupported' | 'blocked' | 'unavailable';
+  branch?: string;
+  activeSubmissionWeek?: number;
+  fork: ForkIdentitySnapshot;
+  stagedFiles: SubmissionFileSnapshot[];
+  otherStagedFiles: string[];
+  pendingCommits: SubmissionCommitSnapshot[];
+  forkFiles: SubmissionFileSnapshot[];
+  otherForkFiles: string[];
+  activePullRequest?: PullRequestSnapshot;
+  blockedReason?: string;
+  summary: SubmissionSummary;
+  canSync: boolean;
 }
 
 export interface ProblemTopicTag {
@@ -142,7 +221,14 @@ export type WebviewToExtensionMessage =
   | { type: 'runCurrentSolution'; candidateId: string }
   | { type: 'deleteSolution'; uri: string }
   | { type: 'fixAllSolutions' }
-  | { type: 'createSolution'; rootUri: string; slug: string };
+  | { type: 'createSolution'; rootUri: string; slug: string }
+  | { type: 'stageSolution'; uri: string }
+  | { type: 'unstageSolution'; uri: string }
+  | { type: 'commitActiveWeek'; rootUri: string; message: string }
+  | { type: 'pushActiveWeek'; rootUri: string }
+  | { type: 'openPullRequest'; rootUri: string }
+  | { type: 'syncFork'; rootUri: string }
+  | { type: 'refreshSubmission' };
 
 export type ExtensionToWebviewMessage =
   | { type: 'state'; state: ExtensionSnapshot }

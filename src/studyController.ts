@@ -49,6 +49,7 @@ export class StudyController implements vscode.Disposable {
   private gitRefreshing: Promise<void> | undefined;
   private gitRefreshRequested = false;
   private forceGitRefreshRequested = false;
+  private forceRemoteRefreshRequested = false;
   private initialized = false;
   private snapshot: ExtensionSnapshot = {
     nickname: '',
@@ -330,6 +331,101 @@ export class StudyController implements vscode.Disposable {
     };
   }
 
+  async stageSolution(uriString: string): Promise<void> {
+    this.requireTrustedWorkspace('풀이를 커밋에 추가하려면 먼저 워크스페이스를 신뢰해야 합니다.');
+    const target = this.findSolution(uriString);
+    if (!target) {
+      throw new Error('요청한 풀이가 현재 워크스페이스에 없습니다.');
+    }
+    const repository = this.requireSubmissionRepository(target.rootUri);
+    this.validateSubmissionWeek(repository, target.week);
+    await this.gitStatusService.stageSolution(
+      vscode.Uri.parse(target.rootUri),
+      vscode.Uri.parse(target.uri),
+    );
+    await this.refreshGitStatuses(true);
+  }
+
+  async unstageSolution(uriString: string): Promise<void> {
+    this.requireTrustedWorkspace('스테이징을 해제하려면 먼저 워크스페이스를 신뢰해야 합니다.');
+    const target = this.findSolution(uriString);
+    if (!target) {
+      throw new Error('요청한 풀이가 현재 워크스페이스에 없습니다.');
+    }
+    this.requireSubmissionRepository(target.rootUri, true);
+    await this.gitStatusService.unstageSolution(
+      vscode.Uri.parse(target.rootUri),
+      vscode.Uri.parse(target.uri),
+    );
+    await this.refreshGitStatuses(true);
+  }
+
+  async commitActiveWeek(rootUri: string, message: string): Promise<void> {
+    this.requireTrustedWorkspace('풀이를 커밋하려면 먼저 워크스페이스를 신뢰해야 합니다.');
+    const repository = this.requireSubmissionRepository(rootUri);
+    const submission = repository.submission!;
+    if (!submission.activeSubmissionWeek || submission.stagedFiles.length === 0) {
+      throw new Error('커밋 준비 상태인 풀이가 없습니다.');
+    }
+    if (submission.stagedFiles.some(({ week }) => week !== submission.activeSubmissionWeek)) {
+      throw new Error('서로 다른 주차의 풀이를 한 커밋에 포함할 수 없습니다.');
+    }
+    const stagedUris = new Set(submission.stagedFiles.map(({ uri }) => uri));
+    const stagedOutdated = repository.problems.flatMap(({ solutions }) => solutions)
+      .some(({ uri, submissionStatus }) =>
+        stagedUris.has(uri) && submissionStatus === 'staged-outdated'
+      );
+    if (stagedOutdated) {
+      throw new Error('스테이징 후 수정된 풀이를 다시 커밋에 추가해 주세요.');
+    }
+    await this.gitStatusService.commit(
+      vscode.Uri.parse(rootUri),
+      message,
+      submission.stagedFiles,
+    );
+    await this.refreshGitStatuses(true);
+  }
+
+  async pushActiveWeek(rootUri: string): Promise<void> {
+    this.requireTrustedWorkspace('풀이를 push하려면 먼저 워크스페이스를 신뢰해야 합니다.');
+    const repository = this.requireSubmissionRepository(rootUri);
+    await this.gitStatusService.push(
+      vscode.Uri.parse(rootUri),
+      repository.problems.flatMap((problem) =>
+        problem.solutions.map((solution) => ({
+          name: solution.name,
+          uri: solution.uri,
+          slug: problem.slug,
+          week: problem.week,
+        }))
+      ),
+    );
+    await this.refreshGitStatuses(true, true);
+  }
+
+  async openPullRequest(rootUri: string): Promise<void> {
+    const repository = this.requireSubmissionRepository(rootUri);
+    await this.gitStatusService.openPullRequest(
+      repository.submission!,
+      this.snapshot.nickname,
+    );
+  }
+
+  async syncFork(rootUri: string): Promise<void> {
+    this.requireTrustedWorkspace('포크를 동기화하려면 먼저 워크스페이스를 신뢰해야 합니다.');
+    const repository = this.requireSubmissionRepository(rootUri);
+    if (!repository.submission?.canSync) {
+      throw new Error('현재 Git 변경을 정리한 뒤 포크를 동기화해 주세요.');
+    }
+    await this.gitStatusService.syncFork(vscode.Uri.parse(rootUri));
+    await this.refresh();
+    await this.refreshGitStatuses(true, true);
+  }
+
+  async refreshSubmission(): Promise<void> {
+    await this.refreshGitStatuses(true, true);
+  }
+
   dispose(): void {
     this.clearScheduledFullRefresh();
     if (this.gitRefreshTimer) {
@@ -379,11 +475,18 @@ export class StudyController implements vscode.Disposable {
       return {
         ...repository,
         gitRemote: previousRepository?.gitRemote,
+        submission: previousRepository?.submission
+          ? { ...previousRepository.submission, status: 'checking' }
+          : undefined,
         problems: repository.problems.map((problem) => ({
           ...problem,
           solutions: problem.solutions.map((solution) => ({
             ...solution,
             gitStatus: previousSolutions.get(solution.uri)?.gitStatus ?? 'checking',
+            submissionStatus:
+              previousSolutions.get(solution.uri)?.submissionStatus ?? 'checking',
+            pullRequestNumber:
+              previousSolutions.get(solution.uri)?.pullRequestNumber,
           })),
         })),
       };
@@ -408,6 +511,7 @@ export class StudyController implements vscode.Disposable {
   private async withGitStatuses(
     repositories: RepositorySnapshot[],
     forceStatus: boolean,
+    forceRemote = false,
   ): Promise<RepositorySnapshot[]> {
     return Promise.all(repositories.map(async (repository) => {
       const solutions = repository.problems.flatMap((problem) => problem.solutions);
@@ -415,15 +519,29 @@ export class StudyController implements vscode.Disposable {
         vscode.Uri.parse(repository.rootUri),
         solutions.map(({ uri }) => uri),
         forceStatus,
+        repository.problems.flatMap((problem) =>
+          problem.solutions.map((solution) => ({
+            name: solution.name,
+            uri: solution.uri,
+            slug: problem.slug,
+            week: problem.week,
+          }))
+        ),
+        forceRemote,
       );
       return {
         ...repository,
         gitRemote: result.remoteName,
+        submission: result.submission,
         problems: repository.problems.map((problem) => ({
           ...problem,
           solutions: problem.solutions.map((solution) => ({
             ...solution,
             gitStatus: result.statuses.get(solution.uri) ?? 'unknown',
+            submissionStatus:
+              result.submissionStatuses?.get(solution.uri) ?? 'unknown',
+            pullRequestNumber:
+              result.pullRequestNumbers?.get(solution.uri),
           })),
         })),
       };
@@ -451,9 +569,13 @@ export class StudyController implements vscode.Disposable {
     }, REFRESH_DEBOUNCE_MS);
   }
 
-  private async refreshGitStatuses(forceStatus = false): Promise<void> {
+  private async refreshGitStatuses(
+    forceStatus = false,
+    forceRemote = false,
+  ): Promise<void> {
     this.gitRefreshRequested = true;
     this.forceGitRefreshRequested ||= forceStatus;
+    this.forceRemoteRefreshRequested ||= forceRemote;
     if (this.gitRefreshing) {
       return this.gitRefreshing;
     }
@@ -471,16 +593,23 @@ export class StudyController implements vscode.Disposable {
       this.gitRefreshRequested = false;
       const forceStatus = this.forceGitRefreshRequested;
       this.forceGitRefreshRequested = false;
+      const forceRemote = this.forceRemoteRefreshRequested;
+      this.forceRemoteRefreshRequested = false;
       if (this.refreshing) {
         await this.refreshing;
       }
       const sourceRepositories = this.snapshot.repositories;
-      const repositories = await this.withGitStatuses(sourceRepositories, forceStatus);
+      const repositories = await this.withGitStatuses(
+        sourceRepositories,
+        forceStatus,
+        forceRemote,
+      );
       if (this.snapshot.repositories === sourceRepositories) {
         this.publishRepositories(repositories);
       } else {
         this.gitRefreshRequested = true;
         this.forceGitRefreshRequested ||= forceStatus;
+        this.forceRemoteRefreshRequested ||= forceRemote;
       }
     }
   }
@@ -531,6 +660,7 @@ export class StudyController implements vscode.Disposable {
   private findSolution(uri: string): {
     rootUri: string;
     slug: string;
+    week?: number;
     name: string;
     uri: string;
   } | undefined {
@@ -541,6 +671,7 @@ export class StudyController implements vscode.Disposable {
           return {
             rootUri: repository.rootUri,
             slug: problem.slug,
+            week: problem.week,
             name: solution.name,
             uri: solution.uri,
           };
@@ -548,6 +679,47 @@ export class StudyController implements vscode.Disposable {
       }
     }
     return undefined;
+  }
+
+  private requireTrustedWorkspace(message: string): void {
+    if (!vscode.workspace.isTrusted) {
+      throw new Error(message);
+    }
+  }
+
+  private requireSubmissionRepository(
+    rootUri: string,
+    allowBlocked = false,
+  ): RepositorySnapshot {
+    const repository = this.snapshot.repositories.find((item) => item.rootUri === rootUri);
+    if (!repository) {
+      throw new Error('요청한 저장소가 현재 워크스페이스에 없습니다.');
+    }
+    if (repository.submission?.fork.status !== 'verified') {
+      throw new Error(
+        repository.submission?.fork.reason
+          ?? 'DaleStudy/leetcode-study 포크에서만 제출 기능을 사용할 수 있습니다.',
+      );
+    }
+    if (!allowBlocked && repository.submission.status === 'blocked') {
+      throw new Error(repository.submission.blockedReason ?? '제출 상태를 먼저 정리해 주세요.');
+    }
+    return repository;
+  }
+
+  private validateSubmissionWeek(
+    repository: RepositorySnapshot,
+    week: number | undefined,
+  ): void {
+    if (!week) {
+      throw new Error('풀이의 주차를 확인할 수 없습니다.');
+    }
+    const activeWeek = repository.submission?.activeSubmissionWeek;
+    if (activeWeek !== undefined && activeWeek !== week) {
+      throw new Error(
+        `Week ${activeWeek} 제출이 끝나기 전에는 Week ${week} 풀이를 커밋에 추가할 수 없습니다.`,
+      );
+    }
   }
 
   private rebuildWatchers(): void {

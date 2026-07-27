@@ -81,6 +81,78 @@ const currentProblemBase = {
   },
 };
 
+function submissionSnapshot(): ExtensionSnapshot {
+  const repository = snapshot.repositories[0]!;
+  const problem = repository.problems[0]!;
+  const typescript = problem.solutions[0]!;
+  const python = problem.solutions[1]!;
+  const stagedFile = {
+    name: typescript.name,
+    uri: typescript.uri,
+    relativePath: 'two-sum/CaseUser.ts',
+    slug: 'two-sum',
+    week: 1,
+  };
+  const pushedFile = {
+    name: python.name,
+    uri: python.uri,
+    relativePath: 'two-sum/CaseUser.py',
+    slug: 'two-sum',
+    week: 1,
+  };
+  return {
+    ...snapshot,
+    repositories: [{
+      ...repository,
+      submission: {
+        status: 'ready',
+        branch: 'main',
+        activeSubmissionWeek: 1,
+        fork: {
+          status: 'verified',
+          owner: 'CaseUser',
+          repository: 'leetcode-study',
+          originUrl: 'https://github.com/CaseUser/leetcode-study.git',
+        },
+        stagedFiles: [stagedFile],
+        otherStagedFiles: [],
+        pendingCommits: [{
+          hash: '1234567890abcdef',
+          shortHash: '1234567',
+          message: '[CaseUser] WEEK 01 Solutions',
+          pushed: true,
+          files: [pushedFile],
+          otherFiles: [],
+        }],
+        forkFiles: [pushedFile],
+        otherForkFiles: [],
+        activePullRequest: {
+          number: 77,
+          title: '[CaseUser] WEEK 01 Solutions',
+          url: 'https://github.com/DaleStudy/leetcode-study/pull/77',
+          week: 1,
+        },
+        summary: {
+          working: 0,
+          staged: 1,
+          pushNeeded: 0,
+          prPending: 1,
+          merged: 0,
+          unknown: 0,
+        },
+        canSync: false,
+      },
+      problems: [{
+        ...problem,
+        solutions: [
+          { ...typescript, submissionStatus: 'staged' },
+          { ...python, submissionStatus: 'pr-open', pullRequestNumber: 77 },
+        ],
+      }, repository.problems[1]!],
+    }],
+  };
+}
+
 describe('webview rendering', () => {
   let root: HTMLElement;
   let ui: UiState;
@@ -543,6 +615,180 @@ describe('webview rendering', () => {
 
     expect(root.querySelector('.solution-git-status.checking')?.textContent)
       .toBe('푸시 상태 확인 중');
+  });
+
+  it('stages and unstages verified-fork solutions from problem cards', () => {
+    const post = vi.fn();
+    const state = submissionSnapshot();
+    renderApp(root, state, ui, post);
+
+    const stageButtons = root.querySelectorAll<HTMLButtonElement>('.stage-button');
+    expect(stageButtons).toHaveLength(1);
+    const staged = [...stageButtons].find(({ classList }) => classList.contains('active'));
+    const workingState: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        problems: repository.problems.map((problem) => ({
+          ...problem,
+          solutions: problem.solutions.map((solution) =>
+            solution.name === 'CaseUser.py'
+              ? { ...solution, submissionStatus: 'working' as const }
+              : solution
+          ),
+        })),
+      })),
+    };
+    staged?.click();
+    expect(post).toHaveBeenCalledWith({
+      type: 'unstageSolution',
+      uri: 'file:///study-a/two-sum/CaseUser.ts',
+    });
+
+    renderApp(root, workingState, ui, post);
+    const addButton = [...root.querySelectorAll<HTMLButtonElement>('.stage-button')]
+      .find((button) =>
+        button.getAttribute('aria-label')?.includes('CaseUser.py 커밋에 추가')
+      );
+    addButton?.click();
+    expect(post).toHaveBeenCalledWith({
+      type: 'stageSolution',
+      uri: 'file:///study-a/two-sum/CaseUser.py',
+    });
+
+    const outdatedState: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        problems: repository.problems.map((problem) => ({
+          ...problem,
+          solutions: problem.solutions.map((solution) =>
+            solution.name === 'CaseUser.ts'
+              ? { ...solution, submissionStatus: 'staged-outdated' as const }
+              : solution
+          ),
+        })),
+      })),
+    };
+    renderApp(root, outdatedState, ui, post);
+    root.querySelector<HTMLButtonElement>(
+      '[aria-label*="CaseUser.ts 최신 수정 다시 추가"]',
+    )?.click();
+    expect(post).toHaveBeenCalledWith({
+      type: 'stageSolution',
+      uri: 'file:///study-a/two-sum/CaseUser.ts',
+    });
+  });
+
+  it('renders the active submission as a single commit rail', () => {
+    const post = vi.fn();
+    ui.viewMode = 'submission';
+    renderApp(root, submissionSnapshot(), ui, post);
+
+    expect(root.querySelector('.submission-view-title')?.textContent).toBe('주차별 제출');
+    expect(
+      [...root.querySelectorAll('.submission-node-title')].map(({ textContent }) => textContent),
+    ).toEqual([
+      'PR #77 · 검토 중',
+      'origin/main',
+      'commit 1234567 · 풀이 1개',
+      '커밋 준비 · 풀이 1개',
+    ]);
+    expect(root.textContent).toContain('two-sum/CaseUser.py');
+    expect(root.textContent).toContain('two-sum/CaseUser.ts');
+    expect(root.textContent).not.toContain('Three Sum');
+
+    (root.querySelector('.submission-commit-input') as HTMLInputElement).value =
+      '[CaseUser] WEEK 01 Updated';
+    root.querySelector<HTMLInputElement>('.submission-commit-input')
+      ?.dispatchEvent(new Event('input'));
+    const commitButton = [...root.querySelectorAll<HTMLButtonElement>(
+      '.submission-action-button',
+    )].find(({ textContent }) => textContent === '이 주차 커밋');
+    commitButton?.click();
+    expect(post).toHaveBeenCalledWith({
+      type: 'commitActiveWeek',
+      rootUri: 'file:///study-a',
+      message: '[CaseUser] WEEK 01 Updated',
+    });
+  });
+
+  it('keeps the submission graph visible when the active editor is cleared', () => {
+    ui.viewMode = 'submission';
+    const renderer = new WebviewRenderer(root, ui, vi.fn());
+    renderer.updateState(submissionSnapshot());
+
+    renderer.updateCurrentProblem(undefined);
+
+    expect(root.querySelector('.submission-view-title')?.textContent).toBe('주차별 제출');
+    expect(root.querySelector('.submission-graph')).not.toBeNull();
+    expect(root.querySelector('.problem-list')).toBeNull();
+  });
+
+  it('drops a closed PR node and offers a new PR for the remaining fork files', () => {
+    ui.viewMode = 'submission';
+    const state = submissionSnapshot();
+    const closed: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          activePullRequest: undefined,
+        },
+      })),
+    };
+
+    renderApp(root, closed, ui, vi.fn());
+
+    expect(root.querySelector('.submission-node-title')?.textContent).toBe('PR 만들기');
+    expect(root.textContent).not.toContain('PR #77');
+    expect(
+      root.querySelector<HTMLButtonElement>('.pull-request .submission-action-button')
+        ?.disabled,
+    ).toBe(false);
+  });
+
+  it('removes merged files from the submission graph while keeping the card badge', () => {
+    const state = submissionSnapshot();
+    const merged: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          activeSubmissionWeek: undefined,
+          stagedFiles: [],
+          pendingCommits: [],
+          forkFiles: [],
+          activePullRequest: undefined,
+          summary: {
+            working: 0,
+            staged: 0,
+            pushNeeded: 0,
+            prPending: 0,
+            merged: 2,
+            unknown: 0,
+          },
+        },
+        problems: repository.problems.map((problem) => ({
+          ...problem,
+          solutions: problem.solutions.map((solution) => ({
+            ...solution,
+            submissionStatus: 'merged' as const,
+            pullRequestNumber: undefined,
+          })),
+        })),
+      })),
+    };
+    ui.viewMode = 'submission';
+    renderApp(root, merged, ui, vi.fn());
+    expect(root.querySelector('.submission-node')).toBeNull();
+    expect(root.textContent).toContain('문제 카드에서 풀이를 커밋에 추가');
+
+    ui.viewMode = 'list';
+    renderApp(root, merged, ui, vi.fn());
+    expect(root.textContent).toContain('병합 완료');
   });
 
   it('filters to the displayed solution when unpushed-only is checked', () => {

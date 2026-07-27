@@ -26,7 +26,14 @@ function isWebviewMessage(value: unknown): value is WebviewToExtensionMessage {
     type === 'runCurrentSolution' ||
     type === 'deleteSolution' ||
     type === 'fixAllSolutions' ||
-    type === 'createSolution'
+    type === 'createSolution' ||
+    type === 'stageSolution' ||
+    type === 'unstageSolution' ||
+    type === 'commitActiveWeek' ||
+    type === 'pushActiveWeek' ||
+    type === 'openPullRequest' ||
+    type === 'syncFork' ||
+    type === 'refreshSubmission'
   );
 }
 
@@ -122,6 +129,29 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
           await this.withBusy(() =>
             this.controller.createSolution(message.rootUri, message.slug),
           );
+          break;
+        case 'stageSolution':
+          await this.withBusy(() => this.controller.stageSolution(message.uri));
+          break;
+        case 'unstageSolution':
+          await this.withBusy(() => this.controller.unstageSolution(message.uri));
+          break;
+        case 'commitActiveWeek':
+          await this.withBusy(() =>
+            this.controller.commitActiveWeek(message.rootUri, message.message),
+          );
+          break;
+        case 'pushActiveWeek':
+          await this.withBusy(() => this.controller.pushActiveWeek(message.rootUri));
+          break;
+        case 'openPullRequest':
+          await this.controller.openPullRequest(message.rootUri);
+          break;
+        case 'syncFork':
+          await this.withBusy(() => this.controller.syncFork(message.rootUri));
+          break;
+        case 'refreshSubmission':
+          await this.withBusy(() => this.controller.refreshSubmission());
           break;
       }
     } catch (error) {
