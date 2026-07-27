@@ -20,36 +20,24 @@ import type {
 } from './core/types';
 import { GitStatusService } from './gitStatusService';
 import { StudyRepositoryService } from './repositoryService';
+import {
+  RepositoryRefreshSession,
+  type RepositoryRefreshState,
+} from './repositoryRefreshSession';
 import { SolutionFileService } from './solutionFileService';
 
 const CONFIGURATION_SECTION = 'leetcodeStudyHelper';
-const REFRESH_DEBOUNCE_MS = 150;
-
-interface PendingProblemRefresh {
-  rootUri: string;
-  slug: string;
-}
 
 export class StudyController implements vscode.Disposable {
   private readonly gitStatusService = new GitStatusService();
   private readonly repositoryService = new StudyRepositoryService();
   private readonly solutionFileService = new SolutionFileService();
   private readonly currentProblemSession: CurrentProblemSession;
+  private readonly repositoryRefreshSession: RepositoryRefreshSession;
   private readonly changeEmitter = new vscode.EventEmitter<ExtensionSnapshot>();
   private readonly currentProblemEmitter = new vscode.EventEmitter<CurrentProblemSnapshot | undefined>();
   private readonly disposables: vscode.Disposable[] = [];
-  private readonly pendingProblemRefreshes = new Map<string, PendingProblemRefresh>();
-  private readonly problemRefreshes = new Map<string, Promise<void>>();
   private readonly lastOtherSolutionNames = new Map<string, string>();
-  private watchers: vscode.FileSystemWatcher[] = [];
-  private refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  private gitRefreshTimer: ReturnType<typeof setTimeout> | undefined;
-  private problemRefreshTimer: ReturnType<typeof setTimeout> | undefined;
-  private refreshing: Promise<ExtensionSnapshot> | undefined;
-  private gitRefreshing: Promise<void> | undefined;
-  private gitRefreshRequested = false;
-  private forceGitRefreshRequested = false;
-  private forceRemoteRefreshRequested = false;
   private initialized = false;
   private snapshot: ExtensionSnapshot = {
     nickname: '',
@@ -68,28 +56,33 @@ export class StudyController implements vscode.Disposable {
     private readonly consentState: ConsentState,
   ) {
     this.currentProblemSession = new CurrentProblemSession(extensionUri);
-    this.rebuildWatchers();
+    this.repositoryRefreshSession = new RepositoryRefreshSession(
+      this.repositoryService,
+      this.gitStatusService,
+      () => this.prepareRefreshSettings(),
+    );
     this.disposables.push(
       this.gitStatusService,
       this.currentProblemSession,
-      this.gitStatusService.onDidChange(() => this.scheduleGitRefresh()),
+      this.repositoryRefreshSession,
+      this.repositoryRefreshSession.onDidChange((state) => {
+        this.publishRepositoryState(state);
+      }),
       this.currentProblemSession.onDidChange((currentProblem) => {
         this.snapshot = { ...this.snapshot, currentProblem };
         this.currentProblemEmitter.fire(currentProblem);
-      }),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        this.rebuildWatchers();
-        this.scheduleRefresh();
       }),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (
           event.affectsConfiguration(`${CONFIGURATION_SECTION}.nickname`)
           || event.affectsConfiguration(`${CONFIGURATION_SECTION}.preferredLanguage`)
         ) {
-          this.scheduleRefresh();
+          this.repositoryRefreshSession.scheduleFullRefresh();
         }
       }),
-      vscode.workspace.onDidGrantWorkspaceTrust(() => this.scheduleRefresh()),
+      vscode.workspace.onDidGrantWorkspaceTrust(
+        () => this.repositoryRefreshSession.scheduleFullRefresh(),
+      ),
     );
   }
 
@@ -102,17 +95,16 @@ export class StudyController implements vscode.Disposable {
   }
 
   async refresh(): Promise<ExtensionSnapshot> {
-    this.clearScheduledFullRefresh();
-    if (this.refreshing) {
-      return this.refreshing;
+    const nickname = this.prepareRefreshSettings();
+    const repositoryState = await this.repositoryRefreshSession.refresh(nickname);
+    if (
+      this.snapshot.repositories !== repositoryState.repositories
+      || this.snapshot.issues !== repositoryState.issues
+    ) {
+      this.publishRepositoryState(repositoryState);
     }
-
-    this.refreshing = this.performRefresh();
-    try {
-      return await this.refreshing;
-    } finally {
-      this.refreshing = undefined;
-    }
+    this.initialized = true;
+    return this.snapshot;
   }
 
   async saveSettings(nicknameInput: string, preferredLanguage: string): Promise<void> {
@@ -279,7 +271,11 @@ export class StudyController implements vscode.Disposable {
       return false;
     }
 
-    await this.refreshProblem(target.rootUri, target.slug, true);
+    await this.repositoryRefreshSession.refreshProblem(
+      target.rootUri,
+      target.slug,
+      true,
+    );
     return true;
   }
 
@@ -307,7 +303,7 @@ export class StudyController implements vscode.Disposable {
 
     const document = await vscode.workspace.openTextDocument(result.uri);
     await vscode.window.showTextDocument(document);
-    await this.refreshProblem(rootUri, slug, true);
+    await this.repositoryRefreshSession.refreshProblem(rootUri, slug, true);
     return result.uri.toString();
   }
 
@@ -343,7 +339,7 @@ export class StudyController implements vscode.Disposable {
       vscode.Uri.parse(target.rootUri),
       vscode.Uri.parse(target.uri),
     );
-    await this.refreshGitStatuses(true);
+    await this.repositoryRefreshSession.refreshGitStatuses(true);
   }
 
   async unstageSolution(uriString: string): Promise<void> {
@@ -357,7 +353,7 @@ export class StudyController implements vscode.Disposable {
       vscode.Uri.parse(target.rootUri),
       vscode.Uri.parse(target.uri),
     );
-    await this.refreshGitStatuses(true);
+    await this.repositoryRefreshSession.refreshGitStatuses(true);
   }
 
   async commitActiveWeek(rootUri: string, message: string): Promise<void> {
@@ -383,7 +379,7 @@ export class StudyController implements vscode.Disposable {
       message,
       submission.stagedFiles,
     );
-    await this.refreshGitStatuses(true);
+    await this.repositoryRefreshSession.refreshGitStatuses(true);
   }
 
   async pushActiveWeek(rootUri: string): Promise<void> {
@@ -400,7 +396,7 @@ export class StudyController implements vscode.Disposable {
         }))
       ),
     );
-    await this.refreshGitStatuses(true, true);
+    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
   }
 
   async openPullRequest(rootUri: string): Promise<void> {
@@ -419,78 +415,19 @@ export class StudyController implements vscode.Disposable {
     }
     await this.gitStatusService.syncFork(vscode.Uri.parse(rootUri));
     await this.refresh();
-    await this.refreshGitStatuses(true, true);
+    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
   }
 
   async refreshSubmission(): Promise<void> {
-    await this.refreshGitStatuses(true, true);
+    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
   }
 
   dispose(): void {
-    this.clearScheduledFullRefresh();
-    if (this.gitRefreshTimer) {
-      clearTimeout(this.gitRefreshTimer);
-    }
-    if (this.problemRefreshTimer) {
-      clearTimeout(this.problemRefreshTimer);
-    }
-    this.disposeWatchers();
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
     this.changeEmitter.dispose();
     this.currentProblemEmitter.dispose();
-  }
-
-  private async performRefresh(): Promise<ExtensionSnapshot> {
-    const { nickname, preferredLanguage } = this.readSettings();
-    const scanResult = await this.repositoryService.scan(nickname);
-    const repositories = this.reuseGitStatuses(scanResult.repositories);
-    this.currentProblemSession.setRepositories(repositories);
-    this.snapshot = {
-      nickname,
-      preferredLanguage,
-      languages: [...LANGUAGE_OPTIONS],
-      repositories,
-      issues: scanResult.issues,
-      workspaceTrusted: vscode.workspace.isTrusted,
-      currentProblem: this.currentProblemSession.currentSnapshot,
-    };
-    this.initialized = true;
-    this.changeEmitter.fire(this.snapshot);
-    void this.refreshGitStatuses(true);
-    return this.snapshot;
-  }
-
-  private reuseGitStatuses(repositories: RepositorySnapshot[]): RepositorySnapshot[] {
-    const previousRepositories = new Map(
-      this.snapshot.repositories.map((repository) => [repository.rootUri, repository]),
-    );
-    return repositories.map((repository) => {
-      const previousRepository = previousRepositories.get(repository.rootUri);
-      const previousSolutions = new Map(
-        previousRepository?.problems.flatMap((problem) => problem.solutions)
-          .map((solution) => [solution.uri, solution] as const) ?? [],
-      );
-      return {
-        ...repository,
-        gitRemote: previousRepository?.gitRemote,
-        submission: previousRepository?.submission
-          ? { ...previousRepository.submission, status: 'checking' }
-          : undefined,
-        problems: repository.problems.map((problem) => ({
-          ...problem,
-          solutions: problem.solutions.map((solution) => ({
-            ...solution,
-            gitStatus: previousSolutions.get(solution.uri)?.gitStatus ?? 'checking',
-            submissionStatus:
-              previousSolutions.get(solution.uri)?.submissionStatus ?? 'checking',
-            pullRequestNumber:
-              previousSolutions.get(solution.uri)?.pullRequestNumber,
-          })),
-        })),
-      };
-    });
   }
 
   private readSettings(): { nickname: string; preferredLanguage: string } {
@@ -508,150 +445,24 @@ export class StudyController implements vscode.Disposable {
     };
   }
 
-  private async withGitStatuses(
-    repositories: RepositorySnapshot[],
-    forceStatus: boolean,
-    forceRemote = false,
-  ): Promise<RepositorySnapshot[]> {
-    return Promise.all(repositories.map(async (repository) => {
-      const solutions = repository.problems.flatMap((problem) => problem.solutions);
-      const result = await this.gitStatusService.getStatuses(
-        vscode.Uri.parse(repository.rootUri),
-        solutions.map(({ uri }) => uri),
-        forceStatus,
-        repository.problems.flatMap((problem) =>
-          problem.solutions.map((solution) => ({
-            name: solution.name,
-            uri: solution.uri,
-            slug: problem.slug,
-            week: problem.week,
-          }))
-        ),
-        forceRemote,
-      );
-      return {
-        ...repository,
-        gitRemote: result.remoteName,
-        submission: result.submission,
-        problems: repository.problems.map((problem) => ({
-          ...problem,
-          solutions: problem.solutions.map((solution) => ({
-            ...solution,
-            gitStatus: result.statuses.get(solution.uri) ?? 'unknown',
-            submissionStatus:
-              result.submissionStatuses?.get(solution.uri) ?? 'unknown',
-            pullRequestNumber:
-              result.pullRequestNumbers?.get(solution.uri),
-          })),
-        })),
-      };
-    }));
-  }
-
-  private scheduleRefresh(): void {
-    this.clearScheduledFullRefresh();
-    this.refreshTimer = setTimeout(() => {
-      this.refreshTimer = undefined;
-      void this.refresh();
-    }, REFRESH_DEBOUNCE_MS);
-  }
-
-  private scheduleGitRefresh(): void {
-    if (!this.initialized) {
-      return;
-    }
-    if (this.gitRefreshTimer) {
-      clearTimeout(this.gitRefreshTimer);
-    }
-    this.gitRefreshTimer = setTimeout(() => {
-      this.gitRefreshTimer = undefined;
-      void this.refreshGitStatuses();
-    }, REFRESH_DEBOUNCE_MS);
-  }
-
-  private async refreshGitStatuses(
-    forceStatus = false,
-    forceRemote = false,
-  ): Promise<void> {
-    this.gitRefreshRequested = true;
-    this.forceGitRefreshRequested ||= forceStatus;
-    this.forceRemoteRefreshRequested ||= forceRemote;
-    if (this.gitRefreshing) {
-      return this.gitRefreshing;
-    }
-
-    this.gitRefreshing = this.drainGitRefreshes();
-    try {
-      await this.gitRefreshing;
-    } finally {
-      this.gitRefreshing = undefined;
-    }
-  }
-
-  private async drainGitRefreshes(): Promise<void> {
-    while (this.gitRefreshRequested) {
-      this.gitRefreshRequested = false;
-      const forceStatus = this.forceGitRefreshRequested;
-      this.forceGitRefreshRequested = false;
-      const forceRemote = this.forceRemoteRefreshRequested;
-      this.forceRemoteRefreshRequested = false;
-      if (this.refreshing) {
-        await this.refreshing;
-      }
-      const sourceRepositories = this.snapshot.repositories;
-      const repositories = await this.withGitStatuses(
-        sourceRepositories,
-        forceStatus,
-        forceRemote,
-      );
-      if (this.snapshot.repositories === sourceRepositories) {
-        this.publishRepositories(repositories);
-      } else {
-        this.gitRefreshRequested = true;
-        this.forceGitRefreshRequested ||= forceStatus;
-        this.forceRemoteRefreshRequested ||= forceRemote;
-      }
-    }
-  }
-
-  private async refreshProblem(rootUri: string, slug: string, forceStatus: boolean): Promise<void> {
-    const key = this.problemKey(rootUri, slug);
-    this.pendingProblemRefreshes.delete(key);
-    const existing = this.problemRefreshes.get(key);
-    if (existing) {
-      return existing;
-    }
-    const refresh = (async () => {
-      const repository = this.snapshot.repositories.find((item) => item.rootUri === rootUri);
-      if (!repository) {
-        return;
-      }
-      const updated = await this.repositoryService.refreshProblem(
-        repository,
-        slug,
-        this.snapshot.nickname,
-      );
-      const [withGit] = await this.withGitStatuses([updated], forceStatus);
-      if (!withGit) {
-        return;
-      }
-      this.publishRepositories(
-        this.snapshot.repositories.map((item) => item.rootUri === rootUri ? withGit : item),
-      );
-    })();
-    this.problemRefreshes.set(key, refresh);
-    try {
-      await refresh;
-    } finally {
-      this.problemRefreshes.delete(key);
-    }
-  }
-
-  private publishRepositories(repositories: RepositorySnapshot[]): void {
-    this.currentProblemSession.setRepositories(repositories);
+  private prepareRefreshSettings(): string {
+    const { nickname, preferredLanguage } = this.readSettings();
     this.snapshot = {
       ...this.snapshot,
-      repositories,
+      nickname,
+      preferredLanguage,
+      workspaceTrusted: vscode.workspace.isTrusted,
+    };
+    return nickname;
+  }
+
+  private publishRepositoryState(state: RepositoryRefreshState): void {
+    this.currentProblemSession.setRepositories(state.repositories);
+    this.snapshot = {
+      ...this.snapshot,
+      repositories: state.repositories,
+      issues: state.issues,
+      workspaceTrusted: vscode.workspace.isTrusted,
       currentProblem: this.currentProblemSession.currentSnapshot,
     };
     this.changeEmitter.fire(this.snapshot);
@@ -722,71 +533,8 @@ export class StudyController implements vscode.Disposable {
     }
   }
 
-  private rebuildWatchers(): void {
-    this.disposeWatchers();
-    for (const folder of vscode.workspace.workspaceFolders ?? []) {
-      const catalogWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(folder, 'problem-categories.json'),
-      );
-      catalogWatcher.onDidCreate(() => this.scheduleRefresh());
-      catalogWatcher.onDidChange(() => this.scheduleRefresh());
-      catalogWatcher.onDidDelete(() => this.scheduleRefresh());
-
-      const solutionWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(folder, '*/*'),
-      );
-      solutionWatcher.onDidCreate((uri) => this.scheduleProblemRefresh(folder, uri));
-      solutionWatcher.onDidChange((uri) => {
-        if (uri.path.endsWith('/README.md')) {
-          this.scheduleProblemRefresh(folder, uri);
-        }
-      });
-      solutionWatcher.onDidDelete((uri) => this.scheduleProblemRefresh(folder, uri));
-      this.watchers.push(catalogWatcher, solutionWatcher);
-    }
-  }
-
-  private scheduleProblemRefresh(folder: vscode.WorkspaceFolder, uri: vscode.Uri): void {
-    const folderPath = folder.uri.path.endsWith('/') ? folder.uri.path : `${folder.uri.path}/`;
-    if (!uri.path.startsWith(folderPath)) {
-      return;
-    }
-    const [slug] = uri.path.slice(folderPath.length).split('/');
-    if (!slug) {
-      return;
-    }
-    const pending = { rootUri: folder.uri.toString(), slug };
-    this.pendingProblemRefreshes.set(this.problemKey(pending.rootUri, slug), pending);
-    if (this.problemRefreshTimer) {
-      clearTimeout(this.problemRefreshTimer);
-    }
-    this.problemRefreshTimer = setTimeout(() => {
-      this.problemRefreshTimer = undefined;
-      const refreshes = [...this.pendingProblemRefreshes.values()];
-      this.pendingProblemRefreshes.clear();
-      void (async () => {
-        for (const item of refreshes) {
-          await this.refreshProblem(item.rootUri, item.slug, true);
-        }
-      })();
-    }, REFRESH_DEBOUNCE_MS);
-  }
-
   private problemKey(rootUri: string, slug: string): string {
     return `${rootUri}\u0000${slug}`;
   }
 
-  private clearScheduledFullRefresh(): void {
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = undefined;
-    }
-  }
-
-  private disposeWatchers(): void {
-    for (const watcher of this.watchers) {
-      watcher.dispose();
-    }
-    this.watchers = [];
-  }
 }
