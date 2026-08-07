@@ -323,7 +323,7 @@ export class GitStatusService implements vscode.Disposable {
     );
     const mixedWeeks = activeWeeks.size > 1;
     const branch = repository.state.HEAD?.name;
-    let hasBlockingOriginCommits = false;
+    let hasBlockingOriginCommits: boolean;
     try {
       const originRelation = await getRefRelation(repository, 'origin/main');
       hasBlockingOriginCommits = originRelation === 'ahead'
