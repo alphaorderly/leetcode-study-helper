@@ -10,6 +10,8 @@ import {
   isCanonicalRemote,
   parseConsistentRemote,
 } from './githubSubmissionClient';
+import { buildPullRequestBody } from './pullRequestBody';
+import { getRefRelation } from './refRelation';
 import {
   type GitRepository,
   type GitRepositoryAdapter,
@@ -25,8 +27,6 @@ export interface SubmissionSolution {
   readonly slug: string;
   readonly week?: number;
 }
-
-type GitRefRelation = 'equal' | 'ahead' | 'behind' | 'diverged';
 
 export class SubmissionActions {
   constructor(
@@ -106,7 +106,7 @@ export class SubmissionActions {
     await repository.fetch({ remote: 'origin', ref: 'main', prune: true });
     await repository.status();
     this.requireCleanOperationState(repository);
-    const relation = await this.getRefRelation(repository, 'origin/main');
+    const relation = await getRefRelation(repository, 'origin/main');
     if (relation === 'equal') {
       throw new Error('origin/main에 push할 로컬 커밋이 없습니다.');
     }
@@ -210,7 +210,7 @@ export class SubmissionActions {
     await repository.status();
     this.requireCleanOperationState(repository);
 
-    const originRelation = await this.getRefRelation(repository, 'origin/main');
+    const originRelation = await getRefRelation(repository, 'origin/main');
     if (originRelation === 'ahead') {
       throw new Error('origin에 push하지 않은 로컬 커밋을 먼저 처리해 주세요.');
     }
@@ -232,11 +232,11 @@ export class SubmissionActions {
     await repository.status();
     this.requireCleanOperationState(repository);
 
-    const upstreamRelation = await this.getRefRelation(repository, 'upstream/main');
+    const upstreamRelation = await getRefRelation(repository, 'upstream/main');
     if (upstreamRelation === 'behind' || upstreamRelation === 'diverged') {
       await this.mergeOrAbort(repository, 'upstream/main');
     }
-    const finalOriginRelation = await this.getRefRelation(repository, 'origin/main');
+    const finalOriginRelation = await getRefRelation(repository, 'origin/main');
     if (finalOriginRelation !== 'equal' && finalOriginRelation !== 'ahead') {
       throw new Error('동기화 결과가 origin/main에서 이어지지 않아 push하지 않았습니다.');
     }
@@ -273,16 +273,7 @@ export class SubmissionActions {
     const files = submission.forkFiles
       .filter(({ week }) => week === submission.activeSubmissionWeek);
     const slugs = [...new Set(files.map(({ slug }) => slug))];
-    const body = [
-      '## 답안 제출 문제',
-      '',
-      ...slugs.map((slug) => `- [x] ${slug}`),
-      '',
-      '## 작성자 체크 리스트',
-      '',
-      '- [ ] Projects에서 현재 주차를 설정했습니다.',
-      '- [ ] 문제를 모두 풀었다면 Status를 In Review로 설정했습니다.',
-    ].join('\n');
+    const body = buildPullRequestBody(slugs);
     const compare = `https://github.com/${CANONICAL_FULL_NAME}/compare/main...${owner}:main`;
     const url = new URL(compare);
     url.searchParams.set('expand', '1');
@@ -322,27 +313,6 @@ export class SubmissionActions {
     if (repository.state.rebaseCommit || repository.state.mergeChanges.length > 0) {
       throw new Error('진행 중인 merge 또는 rebase를 먼저 정리해 주세요.');
     }
-  }
-
-  private async getRefRelation(
-    repository: GitRepository,
-    remoteRef: string,
-  ): Promise<GitRefRelation> {
-    const [head, remote] = await Promise.all([
-      repository.getCommit('HEAD'),
-      repository.getCommit(remoteRef),
-    ]);
-    if (head.hash === remote.hash) {
-      return 'equal';
-    }
-    const mergeBase = await repository.getMergeBase('HEAD', remoteRef);
-    if (mergeBase === remote.hash) {
-      return 'ahead';
-    }
-    if (mergeBase === head.hash) {
-      return 'behind';
-    }
-    return 'diverged';
   }
 
   private async mergeOrAbort(

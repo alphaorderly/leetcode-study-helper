@@ -106,14 +106,40 @@ export const WEEKLY_PROBLEM_SLUGS = [
   ],
 ] as const;
 
+/** DaleStudy issue numbers aligned with WEEKLY_PROBLEMS.md / WEEKLY_PROBLEM_SLUGS. */
+export const WEEKLY_PROBLEM_ISSUES = [
+  [217, 219, 237, 240, 264],
+  [218, 230, 239, 241, 251],
+  [220, 232, 254, 268, 275],
+  [224, 227, 245, 255, 269],
+  [221, 236, 238, 256, 271],
+  [222, 242, 257, 272, 282],
+  [223, 243, 258, 273, 283],
+  [234, 244, 259, 267, 274],
+  [225, 260, 270, 284, 285],
+  [226, 246, 261, 276, 286],
+  [235, 247, 262, 278, 287],
+  [228, 248, 263, 279, 288],
+  [231, 249, 252, 277, 289],
+  [233, 250, 265, 280, 290],
+  [229, 253, 266, 281, 291],
+] as const;
+
 const problemWeekBySlug = new Map<string, number>();
+const problemIssueBySlug = new Map<string, number>();
 
 for (const [index, slugs] of WEEKLY_PROBLEM_SLUGS.entries()) {
-  for (const slug of slugs) {
+  const issues = WEEKLY_PROBLEM_ISSUES[index]!;
+  for (const [slugIndex, slug] of slugs.entries()) {
     problemWeekBySlug.set(slug, index + 1);
+    problemIssueBySlug.set(slug, issues[slugIndex]!);
   }
 }
 
 export function getProblemWeek(slug: string): number | undefined {
   return problemWeekBySlug.get(slug);
+}
+
+export function getProblemIssue(slug: string): number | undefined {
+  return problemIssueBySlug.get(slug);
 }

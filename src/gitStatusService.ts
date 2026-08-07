@@ -21,6 +21,7 @@ import {
   relativeGitPath,
   upstreamRef,
 } from './git/vscodeGit';
+import { getRefRelation } from './git/refRelation';
 import {
   SubmissionActions,
   type SubmissionSolution,
@@ -322,19 +323,21 @@ export class GitStatusService implements vscode.Disposable {
     );
     const mixedWeeks = activeWeeks.size > 1;
     const branch = repository.state.HEAD?.name;
-    const branchUpstream = repository.state.HEAD?.upstream;
-    const tracksOriginMain = branchUpstream
-      ? upstreamRef(branchUpstream) === 'origin/main'
-      : false;
-    const hasKnownUnpushedCommits = tracksOriginMain
-      && (repository.state.HEAD?.ahead ?? 0) > 0;
+    let hasBlockingOriginCommits = false;
+    try {
+      const originRelation = await getRefRelation(repository, 'origin/main');
+      hasBlockingOriginCommits = originRelation === 'ahead'
+        || originRelation === 'diverged';
+    } catch {
+      hasBlockingOriginCommits = true;
+    }
     const hasTrackedChanges = repository.state.indexChanges.length > 0
       || repository.state.workingTreeChanges.length > 0
       || repository.state.mergeChanges.length > 0;
     const canSync = branch === 'main'
       && !hasTrackedChanges
       && !repository.state.rebaseCommit
-      && !hasKnownUnpushedCommits;
+      && !hasBlockingOriginCommits;
     const blockedReason = remote.openPullRequestCount > 1
       ? 'origin/main에서 열린 PR이 여러 개입니다. GitHub에서 하나만 남겨 주세요.'
       : otherStagedFiles.length > 0

@@ -431,6 +431,49 @@ describe('GitStatusService submission actions', () => {
     service.dispose();
   });
 
+  it('disables canSync when main is ahead of origin without upstream', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.upstream = undefined;
+    repository.state.HEAD.commit = 'local';
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({
+          ahead_by: 0,
+          behind_by: 0,
+          files: [],
+          commits: [],
+        });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({
+          truncated: false,
+          tree: [],
+        });
+      }
+      return githubResponse([]);
+    }));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(result.submission?.canSync).toBe(false);
+    service.dispose();
+  });
+
   it('aborts an origin merge when a behind branch encounters conflicts', async () => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
     repository.state.HEAD.commit = 'local';
