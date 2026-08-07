@@ -4,6 +4,7 @@
 .vscode-test/**
 .artifacts/**
 .vscode/**
+.cursor/**
 .vscode-test.mjs
 media/extension-icon-source.svg
 .gitignore
