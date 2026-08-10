@@ -9,6 +9,7 @@ import type {
 import {
   GitHubSubmissionClient,
   parseConsistentRemote,
+  pullRequestStatus,
   type GitHubCompareCommit,
   type RemoteSubmissionState,
 } from './git/githubSubmissionClient';
@@ -32,6 +33,8 @@ import {
   projectSubmissionStatuses,
   singleWeek,
   summaryForStatuses,
+  weekBranchName,
+  weekFromBranch,
 } from './git/submissionModel';
 
 export type { SubmissionSolution } from './git/submissionActions';
@@ -145,13 +148,19 @@ export class GitStatusService implements vscode.Disposable {
           otherForkFiles: [],
           summary: summaryForStatuses(submissionStatuses),
           canSync: false,
+          canReturnToMain: false,
         },
       };
     }
   }
 
-  async stageSolution(repositoryRoot: vscode.Uri, uri: vscode.Uri): Promise<void> {
-    return this.submissionActions.stageSolution(repositoryRoot, uri);
+  async stageSolution(
+    repositoryRoot: vscode.Uri,
+    uri: vscode.Uri,
+    week: number | undefined,
+    solutions: readonly SubmissionSolution[],
+  ): Promise<void> {
+    return this.submissionActions.stageSolution(repositoryRoot, uri, week, solutions);
   }
 
   async unstageSolution(repositoryRoot: vscode.Uri, uri: vscode.Uri): Promise<void> {
@@ -162,8 +171,9 @@ export class GitStatusService implements vscode.Disposable {
     repositoryRoot: vscode.Uri,
     message: string,
     expectedFiles: readonly SubmissionFileSnapshot[],
+    solutions: readonly SubmissionSolution[],
   ): Promise<void> {
-    return this.submissionActions.commit(repositoryRoot, message, expectedFiles);
+    return this.submissionActions.commit(repositoryRoot, message, expectedFiles, solutions);
   }
 
   async push(
@@ -175,6 +185,10 @@ export class GitStatusService implements vscode.Disposable {
 
   async syncFork(repositoryRoot: vscode.Uri): Promise<void> {
     return this.submissionActions.syncFork(repositoryRoot);
+  }
+
+  async returnToMainAndSync(repositoryRoot: vscode.Uri): Promise<void> {
+    return this.submissionActions.returnToMainAndSync(repositoryRoot);
   }
 
   async openPullRequest(
@@ -244,13 +258,24 @@ export class GitStatusService implements vscode.Disposable {
         otherForkFiles: [],
         summary: summaryForStatuses(statuses),
         canSync: false,
+        canReturnToMain: false,
       };
       return { statuses, pullRequestNumbers: new Map(), snapshot };
     }
 
+    const branch = repository.state.HEAD?.name;
+    const stagedWeek = singleWeek(stagedFiles);
+    const currentBranchWeek = weekFromBranch(branch);
+    const requestedSubmissionBranch = currentBranchWeek
+      ? branch
+      : stagedWeek ? weekBranchName(stagedWeek) : undefined;
     let remote: RemoteSubmissionState;
     try {
-      remote = await this.githubClient.getRemoteSubmission(parsedOrigin, forceRemote);
+      remote = await this.githubClient.getRemoteSubmission(
+        parsedOrigin,
+        requestedSubmissionBranch,
+        forceRemote,
+      );
     } catch (error) {
       const statuses = localSubmissionStatuses({
         files,
@@ -272,11 +297,17 @@ export class GitStatusService implements vscode.Disposable {
         otherForkFiles: [],
         summary: summaryForStatuses(statuses),
         canSync: false,
+        canReturnToMain: false,
       };
       return { statuses, pullRequestNumbers: new Map(), snapshot };
     }
 
-    const pendingCommits = await this.getLocalPendingCommits(repository, fileByPath);
+    const submissionBranch = remote.headBranch ?? requestedSubmissionBranch;
+    const pendingCommits = await this.getLocalPendingCommits(
+      repository,
+      fileByPath,
+      currentBranchWeek ? 'main' : undefined,
+    );
     const pendingPaths = new Set(
       pendingCommits.flatMap(({ files }) => files.map(({ relativePath }) => relativePath)),
     );
@@ -314,7 +345,9 @@ export class GitStatusService implements vscode.Disposable {
     ));
     const activeSubmissionWeek = activeWeeks.size === 1
       ? [...activeWeeks][0]
-      : undefined;
+      : activeWeeks.size === 0
+        ? weekFromBranch(submissionBranch)
+        : undefined;
     const pullRequestWeek = singleWeek(
       remote.pullRequestFiles.flatMap((relativePath) => {
         const file = fileByPath.get(relativePath);
@@ -322,9 +355,11 @@ export class GitStatusService implements vscode.Disposable {
       }),
     );
     const mixedWeeks = activeWeeks.size > 1;
-    const branch = repository.state.HEAD?.name;
     let hasBlockingOriginCommits: boolean;
     try {
+      if (branch !== 'main') {
+        throw new Error('not-main');
+      }
       const originRelation = await getRefRelation(repository, 'origin/main');
       hasBlockingOriginCommits = originRelation === 'ahead'
         || originRelation === 'diverged';
@@ -333,23 +368,50 @@ export class GitStatusService implements vscode.Disposable {
     }
     const hasTrackedChanges = repository.state.indexChanges.length > 0
       || repository.state.workingTreeChanges.length > 0
+      || repository.state.untrackedChanges.length > 0
       || repository.state.mergeChanges.length > 0;
     const canSync = branch === 'main'
       && !hasTrackedChanges
       && !repository.state.rebaseCommit
       && !hasBlockingOriginCommits;
+    const latestPullRequestStatus = remote.latestPullRequest
+      ? pullRequestStatus(remote.latestPullRequest)
+      : undefined;
+    const canReturnToMain = currentBranchWeek !== undefined
+      && latestPullRequestStatus === 'merged'
+      && !hasTrackedChanges
+      && !repository.state.rebaseCommit
+      && pendingCommits.length === 0;
+    const branchAllowed = branch === 'main'
+      || (currentBranchWeek !== undefined && branch === submissionBranch);
+    const hasOtherOpenPullRequest = remote.openPullRequestCount === 1
+      && requestedSubmissionBranch !== undefined
+      && remote.headBranch !== requestedSubmissionBranch;
     const blockedReason = remote.openPullRequestCount > 1
-      ? 'origin/main에서 열린 PR이 여러 개입니다. GitHub에서 하나만 남겨 주세요.'
+      ? '열린 주차 PR이 여러 개입니다. GitHub에서 하나만 남겨 주세요.'
+      : hasOtherOpenPullRequest
+        ? '다른 주차 PR이 끝나기 전에는 현재 주차를 제출할 수 없습니다.'
       : otherStagedFiles.length > 0
       ? '풀이 외 파일이 스테이징되어 있습니다. 해당 파일을 먼저 스테이징 해제해 주세요.'
       : mixedWeeks
         ? '공식 저장소에 반영되지 않은 풀이가 여러 주차에 걸쳐 있습니다.'
-      : branch !== 'main'
-        ? '제출 기능은 main 브랜치에서만 사용할 수 있습니다.'
+      : !branchAllowed
+        ? '제출 기능은 main 또는 활성 week-XX 브랜치에서만 사용할 수 있습니다.'
         : undefined;
+    const toPullRequestSnapshot = (
+      pullRequest: NonNullable<RemoteSubmissionState['latestPullRequest']>,
+    ) => ({
+      number: pullRequest.number,
+      title: pullRequest.title,
+      url: pullRequest.html_url,
+      week: pullRequestWeek ?? weekFromBranch(remote.headBranch),
+      branch: remote.headBranch ?? submissionBranch ?? 'week-unknown',
+      status: pullRequestStatus(pullRequest),
+    });
     const snapshot: RepositorySubmissionSnapshot = {
       status: blockedReason ? 'blocked' : 'ready',
       branch,
+      submissionBranch,
       activeSubmissionWeek,
       fork,
       stagedFiles,
@@ -358,16 +420,15 @@ export class GitStatusService implements vscode.Disposable {
       forkFiles,
       otherForkFiles,
       activePullRequest: remote.activePullRequest
-        ? {
-          number: remote.activePullRequest.number,
-          title: remote.activePullRequest.title,
-          url: remote.activePullRequest.html_url,
-          week: pullRequestWeek,
-        }
+        ? toPullRequestSnapshot(remote.activePullRequest)
+        : undefined,
+      pullRequest: remote.latestPullRequest
+        ? toPullRequestSnapshot(remote.latestPullRequest)
         : undefined,
       blockedReason,
       summary: summaryForStatuses(statuses),
       canSync,
+      canReturnToMain,
     };
     return { statuses, pullRequestNumbers, snapshot };
   }
@@ -375,12 +436,13 @@ export class GitStatusService implements vscode.Disposable {
   private async getLocalPendingCommits(
     repository: GitRepository,
     fileByPath: ReadonlyMap<string, SubmissionFileSnapshot>,
+    fallbackRef?: string,
   ): Promise<SubmissionCommitSnapshot[]> {
     const upstream = repository.state.HEAD?.upstream;
-    if (!upstream) {
+    if (!upstream && !fallbackRef) {
       return [];
     }
-    const ref = upstreamRef(upstream);
+    const ref = upstream ? upstreamRef(upstream) : fallbackRef!;
     let commits: GitCommit[];
     try {
       commits = await repository.log({

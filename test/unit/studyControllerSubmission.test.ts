@@ -7,6 +7,7 @@ const gitMocks = vi.hoisted(() => ({
   commit: vi.fn(async () => {}),
   push: vi.fn(async () => {}),
   syncFork: vi.fn(async () => {}),
+  returnToMainAndSync: vi.fn(async () => {}),
   openPullRequest: vi.fn(async () => {}),
   getStatuses: vi.fn(async () => ({
     statuses: new Map(),
@@ -73,6 +74,7 @@ async function createController(submission: RepositorySubmissionSnapshot) {
       readonly commit = gitMocks.commit;
       readonly push = gitMocks.push;
       readonly syncFork = gitMocks.syncFork;
+      readonly returnToMainAndSync = gitMocks.returnToMainAndSync;
       readonly openPullRequest = gitMocks.openPullRequest;
       readonly getStatuses = gitMocks.getStatuses;
       dispose(): void {}
@@ -162,6 +164,8 @@ function submission(
       title: '[CaseUser] WEEK 01 Solutions',
       url: 'https://github.com/DaleStudy/leetcode-study/pull/77',
       week: 1,
+      branch: 'week-01',
+      status: 'open',
     },
     summary: {
       working: 2,
@@ -172,6 +176,7 @@ function submission(
       unknown: 0,
     },
     canSync: false,
+    canReturnToMain: false,
     ...overrides,
   };
 }
@@ -254,6 +259,19 @@ describe('StudyController weekly submission guard', () => {
     )).rejects.toThrow('스테이징 후 수정된 풀이');
 
     expect(gitMocks.commit).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it('delegates an approved merged-branch return to the Git service', async () => {
+    const controller = await createController(submission({
+      branch: 'week-01',
+      canReturnToMain: true,
+    }));
+
+    await controller.returnToMainAndSync('file:///study');
+
+    expect(gitMocks.returnToMainAndSync)
+      .toHaveBeenCalledWith(expect.objectContaining({ fsPath: '/study' }));
     controller.dispose();
   });
 });

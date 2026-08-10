@@ -338,6 +338,8 @@ export class StudyController implements vscode.Disposable {
     await this.gitStatusService.stageSolution(
       vscode.Uri.parse(target.rootUri),
       vscode.Uri.parse(target.uri),
+      target.week,
+      this.submissionSolutions(repository),
     );
     await this.repositoryRefreshSession.refreshGitStatuses(true);
   }
@@ -378,6 +380,7 @@ export class StudyController implements vscode.Disposable {
       vscode.Uri.parse(rootUri),
       message,
       submission.stagedFiles,
+      this.submissionSolutions(repository),
     );
     await this.repositoryRefreshSession.refreshGitStatuses(true);
   }
@@ -387,14 +390,7 @@ export class StudyController implements vscode.Disposable {
     const repository = this.requireSubmissionRepository(rootUri);
     await this.gitStatusService.push(
       vscode.Uri.parse(rootUri),
-      repository.problems.flatMap((problem) =>
-        problem.solutions.map((solution) => ({
-          name: solution.name,
-          uri: solution.uri,
-          slug: problem.slug,
-          week: problem.week,
-        }))
-      ),
+      this.submissionSolutions(repository),
     );
     await this.repositoryRefreshSession.refreshGitStatuses(true, true);
   }
@@ -415,6 +411,16 @@ export class StudyController implements vscode.Disposable {
     }
     await this.gitStatusService.syncFork(vscode.Uri.parse(rootUri));
     await this.refresh();
+    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
+  }
+
+  async returnToMainAndSync(rootUri: string): Promise<void> {
+    this.requireTrustedWorkspace('main으로 돌아가려면 먼저 워크스페이스를 신뢰해야 합니다.');
+    const repository = this.requireSubmissionRepository(rootUri, true);
+    if (!repository.submission?.canReturnToMain) {
+      throw new Error('병합 완료와 깨끗한 Git 상태를 확인한 뒤 main으로 돌아가 주세요.');
+    }
+    await this.gitStatusService.returnToMainAndSync(vscode.Uri.parse(rootUri));
     await this.repositoryRefreshSession.refreshGitStatuses(true, true);
   }
 
@@ -490,6 +496,17 @@ export class StudyController implements vscode.Disposable {
       }
     }
     return undefined;
+  }
+
+  private submissionSolutions(repository: RepositorySnapshot) {
+    return repository.problems.flatMap((problem) =>
+      problem.solutions.map((solution) => ({
+        name: solution.name,
+        uri: solution.uri,
+        slug: problem.slug,
+        week: problem.week,
+      }))
+    );
   }
 
   private requireTrustedWorkspace(message: string): void {

@@ -34,10 +34,17 @@ interface GitHubCompareResponse {
   readonly commits?: GitHubCompareCommit[];
 }
 
-interface GitHubPullRequest {
+export interface GitHubPullRequest {
   readonly number: number;
   readonly title: string;
   readonly html_url: string;
+  readonly state?: 'open' | 'closed';
+  readonly merged_at?: string | null;
+  readonly head?: {
+    readonly ref?: string;
+    readonly repo?: { readonly full_name?: string } | null;
+    readonly user?: { readonly login?: string } | null;
+  };
 }
 
 interface GitHubPullFile {
@@ -61,11 +68,13 @@ export interface ParsedGitHubRemote {
 }
 
 export interface RemoteSubmissionState {
+  readonly headBranch?: string;
   readonly compareFiles: GitHubCompareFile[];
   readonly compareCommits: GitHubCompareCommit[];
   readonly behindBy: number;
   readonly openPullRequestCount: number;
   readonly activePullRequest?: GitHubPullRequest;
+  readonly latestPullRequest?: GitHubPullRequest;
   readonly pullRequestFiles: string[];
   readonly canonicalFilePaths?: ReadonlySet<string>;
 }
@@ -176,34 +185,56 @@ export class GitHubSubmissionClient {
 
   async getRemoteSubmission(
     remote: ParsedGitHubRemote,
+    headBranch: string | undefined,
     force: boolean,
   ): Promise<RemoteSubmissionState> {
-    const key = `${remote.owner}/${remote.repository}`.toLowerCase();
+    const key = `${remote.owner}/${remote.repository}:${headBranch ?? 'auto'}`.toLowerCase();
     const cached = this.remoteSubmissionCache.get(key);
     if (!force && cached && cached.expiresAt > Date.now()) {
       return cached.value;
     }
-    const comparePath =
-      `/repos/${CANONICAL_FULL_NAME}/compare/main...${encodeURIComponent(remote.owner)}:main`;
-    const pullsPath =
-      `/repos/${CANONICAL_FULL_NAME}/pulls?state=open&base=main&head=${encodeURIComponent(`${remote.owner}:main`)}&per_page=10`;
-    const [compare, pulls, canonicalFilePaths] = await Promise.all([
-      this.githubJson<GitHubCompareResponse>(comparePath),
+    const pullsPath = `/repos/${CANONICAL_FULL_NAME}/pulls?state=open&base=main&per_page=100`;
+    const [allOpenPullRequests, canonicalFilePaths, mainCompare] = await Promise.all([
       this.githubJson<GitHubPullRequest[]>(pullsPath),
       this.getCanonicalFilePaths(force),
+      this.githubJson<GitHubCompareResponse>(
+        `/repos/${CANONICAL_FULL_NAME}/compare/main...${encodeURIComponent(remote.owner)}:main`,
+      ),
     ]);
-    const activePullRequest = pulls[0];
-    const pullRequestFiles = activePullRequest
+    const openPullRequests = allOpenPullRequests.filter((pullRequest) =>
+      belongsToFork(pullRequest, remote) && isWeekBranch(pullRequestBranch(pullRequest))
+    );
+    const resolvedHeadBranch = openPullRequests.length === 1
+      ? pullRequestBranch(openPullRequests[0]!)
+      : headBranch;
+    const activePullRequest = resolvedHeadBranch
+      ? openPullRequests.find((pullRequest) =>
+        pullRequestBranch(pullRequest) === resolvedHeadBranch
+      )
+      : undefined;
+    const compare = resolvedHeadBranch
+      ? await this.githubJsonOptional<GitHubCompareResponse>(
+        `/repos/${CANONICAL_FULL_NAME}/compare/main...${encodeURIComponent(remote.owner)}:${encodeURIComponent(resolvedHeadBranch)}`,
+      )
+      : undefined;
+    const latestPullRequest = activePullRequest ?? (resolvedHeadBranch
+      ? (await this.githubJson<GitHubPullRequest[]>(
+        `/repos/${CANONICAL_FULL_NAME}/pulls?state=all&base=main&head=${encodeURIComponent(`${remote.owner}:${resolvedHeadBranch}`)}&sort=updated&direction=desc&per_page=1`,
+      ))[0]
+      : undefined);
+    const pullRequestFiles = latestPullRequest
       ? (await this.githubJson<GitHubPullFile[]>(
-        `/repos/${CANONICAL_FULL_NAME}/pulls/${activePullRequest.number}/files?per_page=100`,
+        `/repos/${CANONICAL_FULL_NAME}/pulls/${latestPullRequest.number}/files?per_page=100`,
       )).map(({ filename }) => filename)
       : [];
     const value: RemoteSubmissionState = {
-      compareFiles: compare.files ?? [],
-      compareCommits: compare.commits ?? [],
-      behindBy: compare.behind_by ?? 0,
-      openPullRequestCount: pulls.length,
+      headBranch: resolvedHeadBranch,
+      compareFiles: compare?.files ?? [],
+      compareCommits: compare?.commits ?? [],
+      behindBy: mainCompare.behind_by ?? 0,
+      openPullRequestCount: openPullRequests.length,
       activePullRequest,
+      latestPullRequest,
       pullRequestFiles,
       canonicalFilePaths,
     };
@@ -273,4 +304,49 @@ export class GitHubSubmissionClient {
       clearTimeout(timer);
     }
   }
+
+  private async githubJsonOptional<T>(apiPath: string): Promise<T | undefined> {
+    try {
+      return await this.githubJson<T>(apiPath);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('(404)')) {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+}
+
+export function pullRequestStatus(
+  pullRequest: GitHubPullRequest,
+): 'open' | 'merged' | 'closed-unmerged' {
+  if (pullRequest.merged_at) {
+    return 'merged';
+  }
+  return pullRequest.state === 'closed' ? 'closed-unmerged' : 'open';
+}
+
+function pullRequestBranch(pullRequest: GitHubPullRequest): string | undefined {
+  const branch = pullRequest.head?.ref;
+  if (branch) {
+    return branch;
+  }
+  const week = pullRequest.title.match(/\bWEEK\s+(\d{1,2})\b/i)?.[1];
+  return week ? `week-${week.padStart(2, '0')}` : undefined;
+}
+
+function isWeekBranch(branch: string | undefined): branch is string {
+  return /^week-\d{2}$/.test(branch ?? '');
+}
+
+function belongsToFork(
+  pullRequest: GitHubPullRequest,
+  remote: ParsedGitHubRemote,
+): boolean {
+  const fullName = pullRequest.head?.repo?.full_name;
+  if (fullName) {
+    return fullName.toLowerCase() === `${remote.owner}/${remote.repository}`.toLowerCase();
+  }
+  const owner = pullRequest.head?.user?.login;
+  return !owner || owner.toLowerCase() === remote.owner.toLowerCase();
 }

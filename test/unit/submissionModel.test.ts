@@ -4,6 +4,8 @@ import {
   localSubmissionStatuses,
   projectSubmissionStatuses,
   summaryForStatuses,
+  weekBranchName,
+  weekFromBranch,
 } from '../../src/git/submissionModel';
 import type { RemoteSubmissionState } from '../../src/git/githubSubmissionClient';
 
@@ -18,6 +20,15 @@ function file(name: string): SubmissionFileSnapshot {
 }
 
 describe('submission status projection', () => {
+  it('maps study weeks to canonical two-digit branch names', () => {
+    expect(weekBranchName(1)).toBe('week-01');
+    expect(weekBranchName(15)).toBe('week-15');
+    expect(weekFromBranch('week-01')).toBe(1);
+    expect(weekFromBranch('week-15')).toBe(15);
+    expect(weekFromBranch('week-1')).toBeUndefined();
+    expect(() => weekBranchName(0)).toThrow('주차');
+  });
+
   it('keeps local conflict and index states ahead of remote progress', () => {
     const conflicted = file('Conflict.py');
     const outdated = file('Outdated.py');

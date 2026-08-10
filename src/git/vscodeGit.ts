@@ -22,6 +22,12 @@ export interface GitBranch {
   readonly behind?: number;
 }
 
+export interface GitRef {
+  readonly name?: string;
+  readonly commit?: string;
+  readonly remote?: string;
+}
+
 export interface GitRemote {
   readonly name: string;
   readonly fetchUrl?: string;
@@ -62,6 +68,9 @@ export interface GitRepository {
     requireUserConfig?: boolean;
     postCommitCommand?: string | null;
   }): Promise<void>;
+  createBranch(name: string, checkout: boolean, ref?: string): Promise<void>;
+  getRefs(query: { pattern?: string | string[] }): Promise<GitRef[]>;
+  checkout(treeish: string): Promise<void>;
   fetch(options?: { remote?: string; ref?: string; prune?: boolean }): Promise<void>;
   push(
     remoteName?: string,

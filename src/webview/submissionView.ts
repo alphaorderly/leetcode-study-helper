@@ -109,12 +109,13 @@ function renderSubmissionGraph(
   }
 
   const hasUnpushed = submission.pendingCommits.some(({ pushed }) => !pushed);
+  const pullRequestSnapshot = submission.pullRequest ?? submission.activePullRequest;
   const hasGraphContent = submission.stagedFiles.length > 0
     || submission.otherStagedFiles.length > 0
     || submission.pendingCommits.length > 0
     || submission.forkFiles.length > 0
     || submission.otherForkFiles.length > 0
-    || Boolean(submission.activePullRequest);
+    || Boolean(pullRequestSnapshot);
   if (!hasGraphContent) {
     graph.append(element(
       'p',
@@ -124,23 +125,30 @@ function renderSubmissionGraph(
     return graph;
   }
 
+  const pullRequestStatusLabel = pullRequestSnapshot?.status === 'merged'
+    ? '병합 완료'
+    : pullRequestSnapshot?.status === 'closed-unmerged'
+      ? '종료됨 · 미병합'
+      : '검토 중';
   const pullRequest = renderSubmissionNode(
     'pull-request',
-    submission.activePullRequest
-      ? `PR #${submission.activePullRequest.number} · 검토 중`
+    pullRequestSnapshot
+      ? `PR #${pullRequestSnapshot.number} · ${pullRequestStatusLabel}`
       : 'PR 만들기',
-    submission.activePullRequest?.title,
+    pullRequestSnapshot?.title,
   );
   const pullRequestButton = element(
     'button',
     'primary-button submission-action-button',
-    submission.activePullRequest ? 'GitHub에서 열기' : 'PR 작성 화면 열기',
+    pullRequestSnapshot ? 'GitHub에서 열기' : 'PR 작성 화면 열기',
   );
   pullRequestButton.type = 'button';
-  pullRequestButton.disabled = ui.busy
-    || Boolean(submission.blockedReason)
-    || (!submission.activePullRequest && (hasUnpushed || submission.forkFiles.length === 0));
-  if (!submission.activePullRequest && hasUnpushed) {
+  pullRequestButton.disabled = ui.busy || (!pullRequestSnapshot && (
+    Boolean(submission.blockedReason)
+    || hasUnpushed
+    || submission.forkFiles.length === 0
+  ));
+  if (!pullRequestSnapshot && hasUnpushed) {
     pullRequestButton.title = '로컬 커밋을 origin에 먼저 push해 주세요.';
   }
   pullRequestButton.addEventListener('click', () =>
@@ -151,7 +159,7 @@ function renderSubmissionGraph(
 
   const origin = renderSubmissionNode(
     `origin${hasUnpushed ? ' pending' : ' complete'}`,
-    'origin/main',
+    `origin/${submission.submissionBranch ?? 'main'}`,
     hasUnpushed ? 'push하지 않은 커밋이 있습니다.' : '포크에 반영됨',
   );
   if (submission.forkFiles.length > 0) {
@@ -312,7 +320,23 @@ export function renderSubmissionView(
   syncButton.addEventListener('click', () =>
     post({ type: 'syncFork', rootUri: repository.rootUri })
   );
+  const returnButton = element(
+    'button',
+    'secondary-button submission-header-button',
+    'main으로 돌아가 동기화',
+  );
+  returnButton.type = 'button';
+  returnButton.disabled = ui.busy || !repository.submission?.canReturnToMain;
+  if (!repository.submission?.canReturnToMain) {
+    returnButton.title = 'PR 병합과 깨끗한 주차 브랜치 상태를 먼저 확인해 주세요.';
+  }
+  returnButton.addEventListener('click', () =>
+    post({ type: 'returnToMainAndSync', rootUri: repository.rootUri })
+  );
   actions.append(refreshButton, syncButton);
+  if (/^week-\d{2}$/.test(repository.submission?.branch ?? '')) {
+    actions.append(returnButton);
+  }
   header.append(titleGroup, actions);
   section.append(header);
 

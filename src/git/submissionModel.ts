@@ -138,6 +138,22 @@ export function singleWeek(
   return weeks.size === 1 ? [...weeks][0] : undefined;
 }
 
+export function weekBranchName(week: number): string {
+  if (!Number.isInteger(week) || week < 1 || week > 99) {
+    throw new Error('제출할 주차를 확인할 수 없습니다.');
+  }
+  return `week-${String(week).padStart(2, '0')}`;
+}
+
+export function weekFromBranch(branch: string | undefined): number | undefined {
+  const match = branch?.match(/^week-(\d{2})$/);
+  if (!match?.[1]) {
+    return undefined;
+  }
+  const week = Number(match[1]);
+  return week >= 1 ? week : undefined;
+}
+
 export function firstLine(value: string): string {
   return value.split(/\r?\n/, 1)[0]?.trim() || '커밋';
 }

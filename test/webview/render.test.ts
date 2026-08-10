@@ -107,6 +107,7 @@ function submissionSnapshot(): ExtensionSnapshot {
       submission: {
         status: 'ready',
         branch: 'main',
+        submissionBranch: 'week-01',
         activeSubmissionWeek: 1,
         fork: {
           status: 'verified',
@@ -131,6 +132,16 @@ function submissionSnapshot(): ExtensionSnapshot {
           title: '[CaseUser] WEEK 01 Solutions',
           url: 'https://github.com/DaleStudy/leetcode-study/pull/77',
           week: 1,
+          branch: 'week-01',
+          status: 'open',
+        },
+        pullRequest: {
+          number: 77,
+          title: '[CaseUser] WEEK 01 Solutions',
+          url: 'https://github.com/DaleStudy/leetcode-study/pull/77',
+          week: 1,
+          branch: 'week-01',
+          status: 'open',
         },
         summary: {
           working: 0,
@@ -141,6 +152,7 @@ function submissionSnapshot(): ExtensionSnapshot {
           unknown: 0,
         },
         canSync: false,
+        canReturnToMain: false,
       },
       problems: [{
         ...problem,
@@ -690,7 +702,7 @@ describe('webview rendering', () => {
       [...root.querySelectorAll('.submission-node-title')].map(({ textContent }) => textContent),
     ).toEqual([
       'PR #77 · 검토 중',
-      'origin/main',
+      'origin/week-01',
       'commit 1234567 · 풀이 1개',
       '커밋 준비 · 풀이 1개',
     ]);
@@ -725,7 +737,7 @@ describe('webview rendering', () => {
     expect(root.querySelector('.problem-list')).toBeNull();
   });
 
-  it('drops a closed PR node and offers a new PR for the remaining fork files', () => {
+  it('distinguishes a closed unmerged PR and keeps its GitHub link', () => {
     ui.viewMode = 'submission';
     const state = submissionSnapshot();
     const closed: ExtensionSnapshot = {
@@ -735,18 +747,22 @@ describe('webview rendering', () => {
         submission: {
           ...repository.submission!,
           activePullRequest: undefined,
+          pullRequest: {
+            ...repository.submission!.pullRequest!,
+            status: 'closed-unmerged',
+          },
         },
       })),
     };
 
     renderApp(root, closed, ui, vi.fn());
 
-    expect(root.querySelector('.submission-node-title')?.textContent).toBe('PR 만들기');
-    expect(root.textContent).not.toContain('PR #77');
+    expect(root.querySelector('.submission-node-title')?.textContent)
+      .toBe('PR #77 · 종료됨 · 미병합');
     expect(
       root.querySelector<HTMLButtonElement>('.pull-request .submission-action-button')
-        ?.disabled,
-    ).toBe(false);
+        ?.textContent,
+    ).toBe('GitHub에서 열기');
   });
 
   it('removes merged files from the submission graph while keeping the card badge', () => {
@@ -762,6 +778,7 @@ describe('webview rendering', () => {
           pendingCommits: [],
           forkFiles: [],
           activePullRequest: undefined,
+          pullRequest: undefined,
           summary: {
             working: 0,
             staged: 0,
@@ -789,6 +806,39 @@ describe('webview rendering', () => {
     ui.viewMode = 'list';
     renderApp(root, merged, ui, vi.fn());
     expect(root.textContent).toContain('병합 완료');
+  });
+
+  it('offers explicit main return only for a merged clean week branch', () => {
+    const post = vi.fn();
+    const state = submissionSnapshot();
+    const merged: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          branch: 'week-01',
+          activePullRequest: undefined,
+          pullRequest: {
+            ...repository.submission!.pullRequest!,
+            status: 'merged',
+          },
+          canReturnToMain: true,
+        },
+      })),
+    };
+    ui.viewMode = 'submission';
+    renderApp(root, merged, ui, post);
+
+    const button = [...root.querySelectorAll<HTMLButtonElement>(
+      '.submission-header-button',
+    )].find(({ textContent }) => textContent === 'main으로 돌아가 동기화');
+    expect(button?.disabled).toBe(false);
+    button?.click();
+    expect(post).toHaveBeenCalledWith({
+      type: 'returnToMainAndSync',
+      rootUri: 'file:///study-a',
+    });
   });
 
   it('filters to the displayed solution when unpushed-only is checked', () => {

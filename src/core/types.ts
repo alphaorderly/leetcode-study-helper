@@ -69,6 +69,8 @@ export interface PullRequestSnapshot {
   title: string;
   url: string;
   week?: number;
+  branch: string;
+  status: 'open' | 'merged' | 'closed-unmerged';
 }
 
 export type ForkVerificationStatus =
@@ -97,6 +99,7 @@ export interface SubmissionSummary {
 export interface RepositorySubmissionSnapshot {
   status: 'checking' | 'ready' | 'unsupported' | 'blocked' | 'unavailable';
   branch?: string;
+  submissionBranch?: string;
   activeSubmissionWeek?: number;
   fork: ForkIdentitySnapshot;
   stagedFiles: SubmissionFileSnapshot[];
@@ -105,9 +108,11 @@ export interface RepositorySubmissionSnapshot {
   forkFiles: SubmissionFileSnapshot[];
   otherForkFiles: string[];
   activePullRequest?: PullRequestSnapshot;
+  pullRequest?: PullRequestSnapshot;
   blockedReason?: string;
   summary: SubmissionSummary;
   canSync: boolean;
+  canReturnToMain: boolean;
 }
 
 export interface ProblemTopicTag {
@@ -228,6 +233,7 @@ export type WebviewToExtensionMessage =
   | { type: 'pushActiveWeek'; rootUri: string }
   | { type: 'openPullRequest'; rootUri: string }
   | { type: 'syncFork'; rootUri: string }
+  | { type: 'returnToMainAndSync'; rootUri: string }
   | { type: 'refreshSubmission' };
 
 export type ExtensionToWebviewMessage =
