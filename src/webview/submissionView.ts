@@ -79,12 +79,20 @@ function renderSubmissionGraph(
     return graph;
   }
   if (submission.status === 'unsupported' || submission.status === 'unavailable') {
-    graph.append(element(
-      'p',
-      'empty-state',
-      submission.fork.reason
-        ?? 'DaleStudy/leetcode-study 포크에서만 제출 기능을 사용할 수 있습니다.',
-    ));
+    const reason = submission.fork.reason
+      ?? 'DaleStudy/leetcode-study 포크에서만 제출 기능을 사용할 수 있습니다.';
+    if (submission.fork.needsGitHubSignIn) {
+      const region = element('div', 'submission-auth');
+      region.append(element('p', 'empty-state', reason));
+      const button = element('button', 'primary-button', 'GitHub으로 로그인');
+      button.type = 'button';
+      button.disabled = ui.busy;
+      button.addEventListener('click', () => post({ type: 'signInGitHub' }));
+      region.append(button);
+      graph.append(region);
+      return graph;
+    }
+    graph.append(element('p', 'empty-state', reason));
     return graph;
   }
   if (submission.blockedReason) {

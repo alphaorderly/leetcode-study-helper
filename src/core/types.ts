@@ -85,6 +85,7 @@ export interface ForkIdentitySnapshot {
   repository?: string;
   originUrl?: string;
   reason?: string;
+  needsGitHubSignIn?: boolean;
 }
 
 export interface SubmissionSummary {
@@ -234,7 +235,8 @@ export type WebviewToExtensionMessage =
   | { type: 'openPullRequest'; rootUri: string }
   | { type: 'syncFork'; rootUri: string }
   | { type: 'returnToMainAndSync'; rootUri: string }
-  | { type: 'refreshSubmission' };
+  | { type: 'refreshSubmission' }
+  | { type: 'signInGitHub' };
 
 export type ExtensionToWebviewMessage =
   | { type: 'state'; state: ExtensionSnapshot }

@@ -12,6 +12,7 @@ const gitMocks = vi.hoisted(() => ({
   getStatuses: vi.fn(async () => ({
     statuses: new Map(),
   })),
+  signInGitHub: vi.fn(async () => true),
 }));
 
 function event(): (listener: (value: unknown) => void) => { dispose(): void } {
@@ -77,6 +78,7 @@ async function createController(submission: RepositorySubmissionSnapshot) {
       readonly returnToMainAndSync = gitMocks.returnToMainAndSync;
       readonly openPullRequest = gitMocks.openPullRequest;
       readonly getStatuses = gitMocks.getStatuses;
+      readonly signInGitHub = gitMocks.signInGitHub;
       dispose(): void {}
     },
   }));
@@ -272,6 +274,44 @@ describe('StudyController weekly submission guard', () => {
 
     expect(gitMocks.returnToMainAndSync)
       .toHaveBeenCalledWith(expect.objectContaining({ fsPath: '/study' }));
+    controller.dispose();
+  });
+
+  it('signs in to GitHub and refreshes remote submission state', async () => {
+    gitMocks.signInGitHub.mockResolvedValueOnce(true);
+    const controller = await createController(submission());
+    const refresh = vi.spyOn(
+      (controller as unknown as {
+        repositoryRefreshSession: {
+          refreshGitStatuses: (forceStatus?: boolean, forceRemote?: boolean) => Promise<void>;
+        };
+      }).repositoryRefreshSession,
+      'refreshGitStatuses',
+    ).mockResolvedValue();
+
+    await controller.signInGitHub();
+
+    expect(gitMocks.signInGitHub).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledWith(true, true);
+    controller.dispose();
+  });
+
+  it('does not refresh when GitHub sign-in is cancelled', async () => {
+    gitMocks.signInGitHub.mockResolvedValueOnce(false);
+    const controller = await createController(submission());
+    const refresh = vi.spyOn(
+      (controller as unknown as {
+        repositoryRefreshSession: {
+          refreshGitStatuses: (forceStatus?: boolean, forceRemote?: boolean) => Promise<void>;
+        };
+      }).repositoryRefreshSession,
+      'refreshGitStatuses',
+    ).mockResolvedValue();
+
+    await controller.signInGitHub();
+
+    expect(gitMocks.signInGitHub).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
     controller.dispose();
   });
 });

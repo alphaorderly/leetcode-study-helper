@@ -34,7 +34,8 @@ function isWebviewMessage(value: unknown): value is WebviewToExtensionMessage {
     type === 'openPullRequest' ||
     type === 'syncFork' ||
     type === 'returnToMainAndSync' ||
-    type === 'refreshSubmission'
+    type === 'refreshSubmission' ||
+    type === 'signInGitHub'
   );
 }
 
@@ -156,6 +157,9 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
           break;
         case 'refreshSubmission':
           await this.withBusy(() => this.controller.refreshSubmission());
+          break;
+        case 'signInGitHub':
+          await this.withBusy(() => this.controller.signInGitHub());
           break;
       }
     } catch (error) {

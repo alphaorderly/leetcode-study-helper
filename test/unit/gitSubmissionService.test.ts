@@ -9,6 +9,7 @@ const harness = vi.hoisted(() => ({
     isDirty: boolean;
     save(): Promise<boolean>;
   }>,
+  getSession: vi.fn(async (): Promise<{ accessToken: string } | undefined> => undefined),
 }));
 
 function event(): (listener: (value: unknown) => void) => { dispose(): void } {
@@ -77,6 +78,10 @@ vi.mock('vscode', () => ({
   },
   workspace: {
     textDocuments: harness.textDocuments,
+  },
+  authentication: {
+    getSession: harness.getSession,
+    onDidChangeSessions: () => ({ dispose(): void {} }),
   },
 }));
 
@@ -202,9 +207,19 @@ function githubResponse(body: unknown): Response {
   } as Response;
 }
 
+function githubErrorResponse(status: number): Response {
+  return {
+    ok: false,
+    status,
+    json: async () => ({ message: 'error' }),
+  } as Response;
+}
+
 beforeEach(() => {
   harness.repository = createRepository();
   harness.textDocuments.splice(0);
+  harness.getSession.mockReset();
+  harness.getSession.mockResolvedValue(undefined);
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
     const requestUrl = String(input);
     if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
@@ -1497,6 +1512,92 @@ describe('GitStatusService submission actions', () => {
 
     expect(canonicalTreeRequests).toBe(2);
     expect(refreshed.submissionStatuses?.get(solutionUri)).toBe('merged');
+    service.dispose();
+  });
+
+  it('marks GitHub status unavailable and asks for sign-in after an unauthenticated 403', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => githubErrorResponse(403)));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(result.submission?.status).toBe('unavailable');
+    expect(result.submission?.fork.needsGitHubSignIn).toBe(true);
+    expect(result.submission?.fork.reason).toContain('GitHub으로 로그인');
+    service.dispose();
+  });
+
+  it('sends the GitHub session token on API requests', async () => {
+    harness.getSession.mockResolvedValue({ accessToken: 'token-123' });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({ truncated: false, tree: [] });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({ ahead_by: 0, behind_by: 0, files: [], commits: [] });
+      }
+      return githubResponse([]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/repos/'),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-123',
+        }),
+      }),
+    );
+    expect(harness.getSession).toHaveBeenCalledWith(
+      'github',
+      ['public_repo'],
+      { createIfNone: false, silent: true },
+    );
+    service.dispose();
+  });
+
+  it('prompts for GitHub sign-in and reports success', async () => {
+    harness.getSession.mockResolvedValue({ accessToken: 'token-123' });
+    const service = new GitStatusService();
+
+    await expect(service.signInGitHub()).resolves.toBe(true);
+    expect(harness.getSession).toHaveBeenCalledWith(
+      'github',
+      ['public_repo'],
+      { createIfNone: true },
+    );
+    service.dispose();
+  });
+
+  it('reports a cancelled GitHub sign-in without throwing', async () => {
+    harness.getSession.mockResolvedValue(undefined);
+    const service = new GitStatusService();
+
+    await expect(service.signInGitHub()).resolves.toBe(false);
     service.dispose();
   });
 });

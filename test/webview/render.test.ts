@@ -765,6 +765,65 @@ describe('webview rendering', () => {
     ).toBe('GitHub에서 열기');
   });
 
+  it('shows a GitHub sign-in button when submission status requires auth', () => {
+    const post = vi.fn();
+    ui.viewMode = 'submission';
+    const state = submissionSnapshot();
+    const unavailable: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          status: 'unavailable',
+          fork: {
+            ...repository.submission!.fork,
+            status: 'unavailable',
+            reason: 'GitHub API 요청 한도에 걸렸습니다. GitHub으로 로그인하면 상태를 확인할 수 있습니다.',
+            needsGitHubSignIn: true,
+          },
+        },
+      })),
+    };
+
+    renderApp(root, unavailable, ui, post);
+
+    expect(root.textContent).toContain('GitHub으로 로그인하면');
+    const button = [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .find(({ textContent }) => textContent === 'GitHub으로 로그인');
+    expect(button).toBeDefined();
+    button?.click();
+    expect(post).toHaveBeenCalledWith({ type: 'signInGitHub' });
+  });
+
+  it('does not show a GitHub sign-in button for a generic unavailable fork', () => {
+    ui.viewMode = 'submission';
+    const state = submissionSnapshot();
+    const unavailable: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          status: 'unavailable',
+          fork: {
+            status: 'unavailable',
+            reason: '네트워크 오류로 GitHub 상태를 확인할 수 없습니다.',
+          },
+        },
+      })),
+    };
+
+    renderApp(root, unavailable, ui, vi.fn());
+
+    expect(root.textContent).toContain('네트워크 오류');
+    expect(
+      [...root.querySelectorAll('button')].some(
+        ({ textContent }) => textContent === 'GitHub으로 로그인',
+      ),
+    ).toBe(false);
+  });
+
   it('removes merged files from the submission graph while keeping the card badge', () => {
     const state = submissionSnapshot();
     const merged: ExtensionSnapshot = {

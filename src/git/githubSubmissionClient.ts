@@ -127,12 +127,40 @@ export function isCanonicalRemote(url: string | undefined): boolean {
     && parsed.repository.toLowerCase() === CANONICAL_REPOSITORY.toLowerCase();
 }
 
+export class GitHubRequestError extends Error {
+  readonly status: number;
+  readonly usedAuth: boolean;
+  readonly needsSignIn: boolean;
+
+  constructor(status: number, usedAuth: boolean) {
+    const needsSignIn = status === 401 || (status === 403 && !usedAuth);
+    super(
+      needsSignIn
+        ? 'GitHub API 요청 한도에 걸렸습니다. GitHub으로 로그인하면 상태를 확인할 수 있습니다.'
+        : `GitHub 상태 확인 실패 (${status})`,
+    );
+    this.name = 'GitHubRequestError';
+    this.status = status;
+    this.usedAuth = usedAuth;
+    this.needsSignIn = needsSignIn;
+  }
+}
+
+export function githubRequestNeedsSignIn(error: unknown): boolean {
+  return error instanceof GitHubRequestError && error.needsSignIn;
+}
+
 export class GitHubSubmissionClient {
   private readonly forkIdentityCache =
     new Map<string, CachedRemoteValue<ForkIdentitySnapshot>>();
   private readonly remoteSubmissionCache =
     new Map<string, CachedRemoteValue<RemoteSubmissionState>>();
   private canonicalTreeCache: CachedRemoteValue<ReadonlySet<string>> | undefined;
+
+  constructor(
+    private readonly getAccessToken: () => Promise<string | undefined> = async () =>
+      undefined,
+  ) {}
 
   async getForkIdentity(
     remote: ParsedGitHubRemote,
@@ -179,6 +207,7 @@ export class GitHubSubmissionClient {
         repository: remote.repository,
         originUrl: remote.url,
         reason: error instanceof Error ? error.message : String(error),
+        needsGitHubSignIn: githubRequestNeedsSignIn(error),
       };
     }
   }
@@ -250,10 +279,13 @@ export class GitHubSubmissionClient {
     this.canonicalTreeCache = undefined;
   }
 
-  dispose(): void {
+  clearCaches(): void {
     this.forkIdentityCache.clear();
-    this.remoteSubmissionCache.clear();
-    this.canonicalTreeCache = undefined;
+    this.clearSubmissionCache();
+  }
+
+  dispose(): void {
+    this.clearCaches();
   }
 
   private async getCanonicalFilePaths(
@@ -285,19 +317,24 @@ export class GitHubSubmissionClient {
   }
 
   private async githubJson<T>(apiPath: string): Promise<T> {
+    const token = await this.getAccessToken();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), GITHUB_API_TIMEOUT_MS);
+    const headers: Record<string, string> = {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'leetcode-study-helper',
+      'X-GitHub-Api-Version': '2022-11-28',
+    };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     try {
       const response = await fetch(`https://api.github.com${apiPath}`, {
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'User-Agent': 'leetcode-study-helper',
-          'X-GitHub-Api-Version': '2022-11-28',
-        },
+        headers,
         signal: controller.signal,
       });
       if (!response.ok) {
-        throw new Error(`GitHub 상태 확인 실패 (${response.status})`);
+        throw new GitHubRequestError(response.status, Boolean(token));
       }
       return await response.json() as T;
     } finally {
@@ -309,7 +346,7 @@ export class GitHubSubmissionClient {
     try {
       return await this.githubJson<T>(apiPath);
     } catch (error) {
-      if (error instanceof Error && error.message.includes('(404)')) {
+      if (error instanceof GitHubRequestError && error.status === 404) {
         return undefined;
       }
       throw error;

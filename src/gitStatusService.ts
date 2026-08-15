@@ -6,8 +6,10 @@ import type {
   SubmissionCommitSnapshot,
   SubmissionFileSnapshot,
 } from './core/types';
+import { GitHubAuthService } from './git/githubAuth';
 import {
   GitHubSubmissionClient,
+  githubRequestNeedsSignIn,
   parseConsistentRemote,
   pullRequestStatus,
   type GitHubCompareCommit,
@@ -48,13 +50,21 @@ export interface SolutionGitStatusResult {
 }
 
 export class GitStatusService implements vscode.Disposable {
+  private readonly changeEmitter = new vscode.EventEmitter<void>();
   private readonly repositoryAdapter = new GitRepositoryAdapter();
-  private readonly githubClient = new GitHubSubmissionClient();
+  private readonly githubAuth = new GitHubAuthService(() => this.onGitHubSessionsChanged());
+  private readonly githubClient = new GitHubSubmissionClient(
+    () => this.githubAuth.getAccessToken(),
+  );
   private readonly submissionActions = new SubmissionActions(
     this.repositoryAdapter,
     this.githubClient,
   );
-  readonly onDidChange = this.repositoryAdapter.onDidChange;
+  private readonly disposables: vscode.Disposable[] = [
+    this.githubAuth,
+    this.repositoryAdapter.onDidChange(() => this.changeEmitter.fire()),
+  ];
+  readonly onDidChange = this.changeEmitter.event;
 
   async getStatuses(
     repositoryRoot: vscode.Uri,
@@ -140,6 +150,7 @@ export class GitStatusService implements vscode.Disposable {
             reason: error instanceof Error
               ? error.message
               : 'Git 제출 상태를 확인할 수 없습니다.',
+            needsGitHubSignIn: githubRequestNeedsSignIn(error),
           },
           stagedFiles: [],
           otherStagedFiles: [],
@@ -198,9 +209,27 @@ export class GitStatusService implements vscode.Disposable {
     return this.submissionActions.openPullRequest(submission, nickname);
   }
 
+  async signInGitHub(): Promise<boolean> {
+    const token = await this.githubAuth.getAccessToken({ prompt: true });
+    if (!token) {
+      return false;
+    }
+    this.githubClient.clearCaches();
+    return true;
+  }
+
   dispose(): void {
+    for (const disposable of this.disposables) {
+      disposable.dispose();
+    }
     this.repositoryAdapter.dispose();
     this.githubClient.dispose();
+    this.changeEmitter.dispose();
+  }
+
+  private onGitHubSessionsChanged(): void {
+    this.githubClient.clearCaches();
+    this.changeEmitter.fire();
   }
 
   private async getSubmission(
@@ -289,6 +318,7 @@ export class GitStatusService implements vscode.Disposable {
         fork: {
           ...fork,
           reason: error instanceof Error ? error.message : String(error),
+          needsGitHubSignIn: githubRequestNeedsSignIn(error),
         },
         stagedFiles,
         otherStagedFiles,

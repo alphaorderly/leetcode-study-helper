@@ -428,6 +428,14 @@ export class StudyController implements vscode.Disposable {
     await this.repositoryRefreshSession.refreshGitStatuses(true, true);
   }
 
+  async signInGitHub(): Promise<void> {
+    const signedIn = await this.gitStatusService.signInGitHub();
+    if (!signedIn) {
+      return;
+    }
+    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
+  }
+
   dispose(): void {
     for (const disposable of this.disposables) {
       disposable.dispose();

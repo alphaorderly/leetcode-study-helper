@@ -998,6 +998,11 @@ button:disabled {
   gap: 10px;
 }
 
+.submission-auth {
+  display: grid;
+  gap: 10px;
+}
+
 .submission-view-header {
   display: grid;
   gap: 8px;
