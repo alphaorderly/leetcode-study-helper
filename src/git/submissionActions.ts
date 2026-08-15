@@ -464,8 +464,12 @@ export class SubmissionActions {
       getRefRelation(repository, 'origin/main'),
       getRefRelation(repository, 'upstream/main'),
     ]);
-    if (originRelation !== 'equal' || upstreamRelation !== 'equal') {
-      throw new Error('main이 origin 또는 공식 저장소와 다릅니다. 포크 동기화를 먼저 실행해 주세요.');
+    if (originRelation !== 'equal') {
+      throw new Error('main이 origin/main과 다릅니다. 포크 동기화를 먼저 실행해 주세요.');
+    }
+    // equal: 동일 SHA. ahead: 공식 main을 이미 포함한 포크(merge 커밋 등).
+    if (upstreamRelation === 'behind' || upstreamRelation === 'diverged') {
+      throw new Error('main이 공식 저장소보다 뒤처져 있습니다. 포크 동기화를 먼저 실행해 주세요.');
     }
   }
 

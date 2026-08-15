@@ -366,12 +366,13 @@ export class GitStatusService implements vscode.Disposable {
     } catch {
       hasBlockingOriginCommits = true;
     }
-    const hasTrackedChanges = repository.state.indexChanges.length > 0
+    const hasDirtyTrackedState = repository.state.indexChanges.length > 0
       || repository.state.workingTreeChanges.length > 0
-      || repository.state.untrackedChanges.length > 0
       || repository.state.mergeChanges.length > 0;
+    const hasUntrackedChanges = repository.state.untrackedChanges.length > 0;
+    // untracked 풀이는 다음 주 준비 중에도 Sync를 막지 않는다.
     const canSync = branch === 'main'
-      && !hasTrackedChanges
+      && !hasDirtyTrackedState
       && !repository.state.rebaseCommit
       && !hasBlockingOriginCommits;
     const latestPullRequestStatus = remote.latestPullRequest
@@ -379,7 +380,8 @@ export class GitStatusService implements vscode.Disposable {
       : undefined;
     const canReturnToMain = currentBranchWeek !== undefined
       && latestPullRequestStatus === 'merged'
-      && !hasTrackedChanges
+      && !hasDirtyTrackedState
+      && !hasUntrackedChanges
       && !repository.state.rebaseCommit
       && pendingCommits.length === 0;
     const branchAllowed = branch === 'main'

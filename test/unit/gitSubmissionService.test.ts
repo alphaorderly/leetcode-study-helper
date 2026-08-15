@@ -768,6 +768,93 @@ describe('GitStatusService submission actions', () => {
     service.dispose();
   });
 
+  it('skips upstream merge when main already contains upstream', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.commit = 'fork-ahead';
+    repository.state.HEAD.upstream!.commit = 'fork-ahead';
+    repository.state.refs.find(({ name }) => name === 'main')!.commit = 'fork-ahead';
+    repository.state.refs.find(({ name }) => name === 'origin/main')!.commit = 'fork-ahead';
+    repository.state.refs.find(({ name }) => name === 'upstream/main')!.commit = 'upstream';
+    repository.getMergeBase.mockImplementation(async (_ref1: string, ref2: string) => {
+      if (ref2 === 'upstream/main') {
+        return 'upstream';
+      }
+      if (ref2 === 'origin/main') {
+        return 'fork-ahead';
+      }
+      return 'origin';
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => githubResponse({
+      fork: true,
+      source: { full_name: 'DaleStudy/leetcode-study' },
+    })));
+    const service = new GitStatusService();
+
+    await service.syncFork(uri('file:///study') as never);
+
+    expect(repository.merge).not.toHaveBeenCalled();
+    expect(repository.push).toHaveBeenCalledWith('origin', 'main', false);
+    service.dispose();
+  });
+
+  it('allows staging a new week when main is ahead of upstream', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.commit = 'fork-ahead';
+    repository.state.HEAD.upstream!.commit = 'fork-ahead';
+    repository.state.refs.find(({ name }) => name === 'main')!.commit = 'fork-ahead';
+    repository.state.refs.find(({ name }) => name === 'origin/main')!.commit = 'fork-ahead';
+    repository.state.refs.find(({ name }) => name === 'upstream/main')!.commit = 'upstream';
+    repository.getMergeBase.mockImplementation(async (_ref1: string, ref2: string) => {
+      if (ref2 === 'upstream/main') {
+        return 'upstream';
+      }
+      if (ref2 === 'origin/main') {
+        return 'fork-ahead';
+      }
+      return 'origin';
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({
+          ahead_by: 1,
+          behind_by: 0,
+          files: [],
+          commits: [],
+        });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({
+          truncated: false,
+          tree: [],
+        });
+      }
+      return githubResponse([]);
+    }));
+    const service = new GitStatusService();
+
+    await service.stageSolution(
+      uri('file:///study') as never,
+      uri('file:///study/two-sum/CaseUser.py') as never,
+      1,
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }],
+    );
+
+    expect(repository.add).toHaveBeenCalledWith(['/study/two-sum/CaseUser.py']);
+    service.dispose();
+  });
+
   it('blocks fork sync when main has commits ahead of origin without an upstream', async () => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
     repository.state.HEAD.upstream = undefined;
@@ -830,6 +917,48 @@ describe('GitStatusService submission actions', () => {
     );
 
     expect(result.submission?.canSync).toBe(false);
+    service.dispose();
+  });
+
+  it('keeps canSync enabled when only untracked files exist on main', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.untrackedChanges = [change('linked-list-cycle/CaseUser.py')];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({
+          ahead_by: 0,
+          behind_by: 0,
+          files: [],
+          commits: [],
+        });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({
+          truncated: false,
+          tree: [],
+        });
+      }
+      return githubResponse([]);
+    }));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(result.submission?.canSync).toBe(true);
     service.dispose();
   });
 

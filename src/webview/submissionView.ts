@@ -315,7 +315,7 @@ export function renderSubmissionView(
   syncButton.type = 'button';
   syncButton.disabled = ui.busy || !repository.submission?.canSync;
   if (!repository.submission?.canSync) {
-    syncButton.title = '스테이징, 추적 파일 수정과 미푸시 커밋을 먼저 정리해 주세요.';
+    syncButton.title = '스테이징·추적 파일 수정과 미푸시 커밋을 먼저 정리해 주세요.';
   }
   syncButton.addEventListener('click', () =>
     post({ type: 'syncFork', rootUri: repository.rootUri })
