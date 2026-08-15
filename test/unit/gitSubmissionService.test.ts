@@ -61,6 +61,9 @@ vi.mock('vscode', () => ({
   env: {
     openExternal: vi.fn(async () => true),
   },
+  commands: {
+    executeCommand: vi.fn(async () => undefined),
+  },
   extensions: {
     getExtension: () => ({
       isActive: true,
@@ -220,6 +223,10 @@ beforeEach(() => {
   harness.textDocuments.splice(0);
   harness.getSession.mockReset();
   harness.getSession.mockResolvedValue(undefined);
+  vi.mocked(vscode.commands.executeCommand).mockReset();
+  vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined);
+  vi.mocked(vscode.env.openExternal).mockReset();
+  vi.mocked(vscode.env.openExternal).mockResolvedValue(true);
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
     const requestUrl = String(input);
     if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
@@ -737,11 +744,17 @@ describe('GitStatusService submission actions', () => {
 
     await service.openPullRequest(submission, 'CaseUser');
 
-    expect(vscode.env.openExternal).toHaveBeenCalledWith(expect.objectContaining({
-      path: expect.stringContaining(
+    const url = vi.mocked(vscode.commands.executeCommand).mock.calls[0]?.[1];
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'vscode.open',
+      expect.stringContaining(
         '/DaleStudy/leetcode-study/compare/main...CaseUser:week-01',
       ),
-    }));
+    );
+    expect(vscode.env.openExternal).not.toHaveBeenCalled();
+    expect(url).toEqual(expect.stringContaining('%23'));
+    expect(url).not.toEqual(expect.stringContaining('%2523'));
+    expect(new URL(String(url)).searchParams.get('body')).toContain('- [x] #219');
     service.dispose();
   });
 

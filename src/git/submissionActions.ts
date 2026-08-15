@@ -4,14 +4,13 @@ import type {
   SubmissionFileSnapshot,
 } from '../core/types';
 import {
-  CANONICAL_FULL_NAME,
   CANONICAL_REMOTE_URL,
   type GitHubSubmissionClient,
   isCanonicalRemote,
   parseConsistentRemote,
   pullRequestStatus,
 } from './githubSubmissionClient';
-import { buildPullRequestBody } from './pullRequestBody';
+import { buildPullRequestBody, buildPullRequestCompareUrl } from './pullRequestBody';
 import { getRefRelation } from './refRelation';
 import { weekBranchName, weekFromBranch } from './submissionModel';
 import {
@@ -372,12 +371,10 @@ export class SubmissionActions {
       .filter(({ week }) => week === submission.activeSubmissionWeek);
     const slugs = [...new Set(files.map(({ slug }) => slug))];
     const body = buildPullRequestBody(slugs);
-    const compare = `https://github.com/${CANONICAL_FULL_NAME}/compare/main...${owner}:${submission.submissionBranch}`;
-    const url = new URL(compare);
-    url.searchParams.set('expand', '1');
-    url.searchParams.set('title', title);
-    url.searchParams.set('body', body);
-    if (!await vscode.env.openExternal(vscode.Uri.parse(url.toString()))) {
+    const url = buildPullRequestCompareUrl(owner, submission.submissionBranch, title, body);
+    try {
+      await vscode.commands.executeCommand('vscode.open', url);
+    } catch {
       throw new Error('GitHub PR 작성 화면을 열지 못했습니다.');
     }
   }

@@ -1,4 +1,5 @@
 import { getProblemIssue } from '../core/studySchedule';
+import { CANONICAL_FULL_NAME } from './githubSubmissionClient';
 
 export function buildPullRequestBody(slugs: readonly string[]): string {
   const problemLines = slugs.map((slug) => {
@@ -25,4 +26,14 @@ export function buildPullRequestBody(slugs: readonly string[]): string {
     '- [ ] 본인이 검토해야하는 PR의 답안 코드에 피드백을 주세요.',
     '- [ ] 토요일 전까지 PR을 병합할 수 있도록 승인해주세요.',
   ].join('\n');
+}
+
+export function buildPullRequestCompareUrl(
+  owner: string,
+  branch: string,
+  title: string,
+  body: string,
+): string {
+  const compare = `https://github.com/${CANONICAL_FULL_NAME}/compare/main...${owner}:${branch}`;
+  return `${compare}?expand=1&title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
 }

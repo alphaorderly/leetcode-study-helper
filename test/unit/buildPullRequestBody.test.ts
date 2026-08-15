@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPullRequestBody } from '../../src/git/pullRequestBody';
+import { buildPullRequestBody, buildPullRequestCompareUrl } from '../../src/git/pullRequestBody';
 
 describe('buildPullRequestBody', () => {
   it('matches the DaleStudy PR template with issue checkboxes', () => {
@@ -26,5 +26,25 @@ describe('buildPullRequestBody', () => {
 
     expect(body).toContain('- [x] custom-problem');
     expect(body).not.toContain('- [x] #');
+  });
+});
+
+describe('buildPullRequestCompareUrl', () => {
+  it('encodes the PR body so GitHub can decode #issue references once', () => {
+    const title = '[CaseUser] WEEK 08 Solutions';
+    const body = buildPullRequestBody(['reverse-bits', 'clone-graph']);
+    const url = buildPullRequestCompareUrl('CaseUser', 'week-08', title, body);
+    const parsed = new URL(url);
+    const decodedBody = parsed.searchParams.get('body');
+    const decodedTitle = parsed.searchParams.get('title');
+
+    expect(url).toContain('/DaleStudy/leetcode-study/compare/main...CaseUser:week-08');
+    expect(url).not.toContain('%2523');
+    expect(url).toContain('%23');
+    expect(decodedTitle).toBe(title);
+    expect(decodedBody).toBe(body);
+    expect(decodedBody).toContain('## 답안 제출 문제');
+    expect(decodedBody).toContain('- [x] #234');
+    expect(decodedBody).toContain('- [x] #259');
   });
 });
