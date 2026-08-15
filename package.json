@@ -2,7 +2,7 @@
   "name": "leetcode-study-helper",
   "displayName": "리트코드 스터디 도우미",
   "description": "DaleStudy 리트코드 워크스페이스에서 풀이를 관리하고 주차별 PR로 제출합니다.",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "publisher": "alphaorderly",
   "license": "MIT",
   "icon": "media/extension-icon.png",
@@ -160,7 +160,7 @@
     "test:unit": "vitest run test/unit test/webview",
     "test:compile:integration": "tsc -p tsconfig.integration.json",
     "test:prepare:integration": "node scripts/prepare-integration-fixture.mjs",
-    "test:integration": "yarn package && yarn test:compile:integration && yarn test:prepare:integration && vscode-test",
+    "test:integration": "yarn package && yarn test:compile:integration && yarn test:prepare:integration && node scripts/run-vscode-test.mjs",
     "test": "yarn lint && yarn typecheck && yarn test:unit && yarn test:integration",
     "dataset:sync": "node scripts/sync-leetcode-dataset.mjs",
     "package:vsix": "yarn test && vsce package --allow-missing-repository --out .artifacts/leetcode-study-helper.vsix"
