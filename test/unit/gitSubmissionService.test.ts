@@ -202,6 +202,65 @@ function createRepository() {
   };
 }
 
+function useCanonicalRemote(
+  repository: ReturnType<typeof createRepository>,
+  name: string,
+): void {
+  repository.state.remotes = [
+    ...repository.state.remotes.filter(
+      (remote) => remote.name !== 'upstream' && remote.name !== name,
+    ),
+    {
+      name,
+      fetchUrl: 'https://github.com/DaleStudy/leetcode-study.git',
+      pushUrl: undefined,
+    },
+  ];
+  repository.state.refs = [
+    ...repository.state.refs.filter(
+      (ref) => ref.name !== 'upstream/main' && ref.name !== `${name}/main`,
+    ),
+    {
+      name: `${name}/main`,
+      commit: repository.state.HEAD.commit,
+      remote: name,
+    },
+  ];
+}
+
+function makeMainAheadOfCanonical(
+  repository: ReturnType<typeof createRepository>,
+  remoteName = 'upstream',
+): void {
+  repository.state.HEAD.commit = 'fork-ahead';
+  if (repository.state.HEAD.upstream) {
+    repository.state.HEAD.upstream.commit = 'fork-ahead';
+  }
+  const main = repository.state.refs.find(({ name }) => name === 'main');
+  if (main) {
+    main.commit = 'fork-ahead';
+  }
+  const originMain = repository.state.refs.find(({ name }) => name === 'origin/main');
+  if (originMain) {
+    originMain.commit = 'fork-ahead';
+  }
+  const canonicalMain = repository.state.refs.find(
+    ({ name }) => name === `${remoteName}/main`,
+  );
+  if (canonicalMain) {
+    canonicalMain.commit = 'canonical';
+  }
+  repository.getMergeBase.mockImplementation(async (_ref1: string, ref2: string) => {
+    if (ref2 === `${remoteName}/main`) {
+      return 'canonical';
+    }
+    if (ref2 === 'origin/main') {
+      return 'fork-ahead';
+    }
+    return 'origin';
+  });
+}
+
 function githubResponse(body: unknown): Response {
   return {
     ok: true,
@@ -425,8 +484,66 @@ describe('GitStatusService submission actions', () => {
     )).rejects.toThrow('스테이징 상태가 변경');
 
     expect(repository.commit).toHaveBeenCalledOnce();
-    expect(repository.createBranch).toHaveBeenCalledWith('week-01', true, 'main');
+    expect(repository.createBranch).toHaveBeenCalledWith('week-01', true, 'upstream/main');
     expect(repository.state.HEAD.name).toBe('week-01');
+    service.dispose();
+  });
+
+  it('creates a new week branch from canonical main when fork main is ahead', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    makeMainAheadOfCanonical(repository);
+    repository.state.indexChanges = [change('two-sum/CaseUser.py')];
+    const expected = [{
+      name: 'CaseUser.py',
+      uri: 'file:///study/two-sum/CaseUser.py',
+      relativePath: 'two-sum/CaseUser.py',
+      slug: 'two-sum',
+      week: 1,
+    }];
+    const service = new GitStatusService();
+
+    await service.commit(
+      uri('file:///study') as never,
+      '[CaseUser] WEEK 01 Solutions',
+      expected,
+      expected,
+    );
+
+    expect(repository.createBranch).toHaveBeenCalledWith('week-01', true, 'upstream/main');
+    expect(repository.state.HEAD.name).toBe('week-01');
+    expect(repository.state.HEAD.commit).toBe('canonical');
+    expect(repository.commit).toHaveBeenCalledOnce();
+    service.dispose();
+  });
+
+  it('uses a differently named canonical remote and does not add upstream', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    useCanonicalRemote(repository, 'official');
+    repository.state.indexChanges = [change('two-sum/CaseUser.py')];
+    const expected = [{
+      name: 'CaseUser.py',
+      uri: 'file:///study/two-sum/CaseUser.py',
+      relativePath: 'two-sum/CaseUser.py',
+      slug: 'two-sum',
+      week: 1,
+    }];
+    const service = new GitStatusService();
+
+    await service.commit(
+      uri('file:///study') as never,
+      '[CaseUser] WEEK 01 Solutions',
+      expected,
+      expected,
+    );
+
+    expect(repository.createBranch).toHaveBeenCalledWith('week-01', true, 'official/main');
+    expect(repository.fetch).toHaveBeenCalledWith({
+      remote: 'official',
+      ref: 'main',
+      prune: true,
+    });
+    expect(repository.addRemote).not.toHaveBeenCalled();
+    expect(repository.commit).toHaveBeenCalledOnce();
     service.dispose();
   });
 
@@ -515,6 +632,162 @@ describe('GitStatusService submission actions', () => {
     )).rejects.toThrow('로컬·원격 상태가 일치하지 않아');
 
     expect(repository.checkout).not.toHaveBeenCalled();
+    expect(repository.commit).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('does not reuse a week branch that contains another week vs canonical main', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.indexChanges = [change('two-sum/CaseUser.py')];
+    repository.state.refs.push(
+      { name: 'week-01', commit: 'week-tip', remote: undefined },
+      { name: 'origin/week-01', commit: 'week-tip', remote: 'origin' },
+    );
+    repository.log.mockResolvedValue([{
+      hash: 'week-eight',
+      message: '[CaseUser] WEEK 08 Solutions',
+      parents: ['origin'],
+    }]);
+    repository.diffBetween.mockResolvedValue([change('linked-list-cycle/CaseUser.py')]);
+    const expected = [{
+      name: 'CaseUser.py',
+      uri: 'file:///study/two-sum/CaseUser.py',
+      relativePath: 'two-sum/CaseUser.py',
+      slug: 'two-sum',
+      week: 1,
+    }];
+    const service = new GitStatusService();
+
+    await expect(service.commit(
+      uri('file:///study') as never,
+      '[CaseUser] WEEK 01 Solutions',
+      expected,
+      [
+        ...expected,
+        {
+          name: 'CaseUser.py',
+          uri: 'file:///study/linked-list-cycle/CaseUser.py',
+          slug: 'linked-list-cycle',
+          week: 8,
+        },
+      ],
+    )).rejects.toThrow('Week 1 풀이 외 변경');
+
+    expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
+      range: 'upstream/main..week-01',
+    }));
+    expect(repository.checkout).not.toHaveBeenCalled();
+    expect(repository.commit).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('does not reuse a week branch that contains a merge commit vs canonical main', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.indexChanges = [change('two-sum/CaseUser.py')];
+    repository.state.refs.push(
+      { name: 'week-01', commit: 'week-tip', remote: undefined },
+      { name: 'origin/week-01', commit: 'week-tip', remote: 'origin' },
+    );
+    repository.log.mockResolvedValue([{
+      hash: 'mergeabc',
+      message: 'Merge origin/main',
+      parents: ['origin', 'personal'],
+    }]);
+    const expected = [{
+      name: 'CaseUser.py',
+      uri: 'file:///study/two-sum/CaseUser.py',
+      relativePath: 'two-sum/CaseUser.py',
+      slug: 'two-sum',
+      week: 1,
+    }];
+    const service = new GitStatusService();
+
+    await expect(service.commit(
+      uri('file:///study') as never,
+      '[CaseUser] WEEK 01 Solutions',
+      expected,
+      expected,
+    )).rejects.toThrow('공식 main이 아닌 merge 히스토리');
+
+    expect(repository.commit).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('commits on a week branch whose history vs canonical main is the current week', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.commit = 'local';
+    repository.state.HEAD.upstream = undefined;
+    repository.state.indexChanges = [change('two-sum/CaseUser.py')];
+    repository.log.mockResolvedValue([{
+      hash: 'local',
+      message: '[CaseUser] WEEK 01 Solutions',
+      parents: ['origin'],
+    }]);
+    repository.diffBetween.mockResolvedValue([change('two-sum/CaseUser.py')]);
+    const expected = [{
+      name: 'CaseUser.py',
+      uri: 'file:///study/two-sum/CaseUser.py',
+      relativePath: 'two-sum/CaseUser.py',
+      slug: 'two-sum',
+      week: 1,
+    }];
+    const service = new GitStatusService();
+
+    await service.commit(
+      uri('file:///study') as never,
+      '[CaseUser] WEEK 01 Solutions',
+      expected,
+      expected,
+    );
+
+    expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
+      range: 'upstream/main..HEAD',
+    }));
+    expect(repository.createBranch).not.toHaveBeenCalled();
+    expect(repository.commit).toHaveBeenCalledOnce();
+    service.dispose();
+  });
+
+  it('rejects committing on a week branch whose canonical range includes another week', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.commit = 'local';
+    repository.state.HEAD.upstream = undefined;
+    repository.state.indexChanges = [change('two-sum/CaseUser.py')];
+    repository.log.mockResolvedValue([{
+      hash: 'week-eight',
+      message: '[CaseUser] WEEK 08 Solutions',
+      parents: ['origin'],
+    }]);
+    repository.diffBetween.mockResolvedValue([change('linked-list-cycle/CaseUser.py')]);
+    const expected = [{
+      name: 'CaseUser.py',
+      uri: 'file:///study/two-sum/CaseUser.py',
+      relativePath: 'two-sum/CaseUser.py',
+      slug: 'two-sum',
+      week: 1,
+    }];
+    const service = new GitStatusService();
+
+    await expect(service.commit(
+      uri('file:///study') as never,
+      '[CaseUser] WEEK 01 Solutions',
+      expected,
+      [
+        ...expected,
+        {
+          name: 'CaseUser.py',
+          uri: 'file:///study/linked-list-cycle/CaseUser.py',
+          slug: 'linked-list-cycle',
+          week: 8,
+        },
+      ],
+    )).rejects.toThrow('Week 1 풀이 외 변경');
+
+    expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
+      range: 'upstream/main..HEAD',
+    }));
     expect(repository.commit).not.toHaveBeenCalled();
     service.dispose();
   });
@@ -623,7 +896,84 @@ describe('GitStatusService submission actions', () => {
     );
 
     expect(repository.fetch).toHaveBeenCalledWith({ remote: 'origin', prune: true });
+    expect(repository.fetch).toHaveBeenCalledWith({
+      remote: 'upstream',
+      ref: 'main',
+      prune: true,
+    });
+    expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
+      range: 'upstream/main..HEAD',
+    }));
     expect(repository.push).toHaveBeenCalledWith('origin', 'week-01', true);
+    service.dispose();
+  });
+
+  it('rejects a first push whose canonical range includes another week', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.upstream = undefined;
+    repository.state.HEAD.commit = 'local';
+    repository.log.mockResolvedValue([{
+      hash: 'week-eight',
+      message: '[CaseUser] WEEK 08 Solutions',
+      parents: ['origin'],
+    }, {
+      hash: 'local',
+      message: '[CaseUser] WEEK 01 Solutions',
+      parents: ['week-eight'],
+    }]);
+    repository.diffBetween.mockImplementation(async (_ref1?: string, ref2?: string) =>
+      ref2 === 'week-eight'
+        ? [change('linked-list-cycle/CaseUser.py')]
+        : [change('two-sum/CaseUser.py')]
+    );
+    const service = new GitStatusService();
+
+    await expect(service.push(
+      uri('file:///study') as never,
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }, {
+        name: 'CaseUser.py',
+        uri: 'file:///study/linked-list-cycle/CaseUser.py',
+        slug: 'linked-list-cycle',
+        week: 8,
+      }],
+    )).rejects.toThrow('서로 다른 주차');
+
+    expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
+      range: 'upstream/main..HEAD',
+    }));
+    expect(repository.push).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('rejects a first push whose canonical range includes a merge commit', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.upstream = undefined;
+    repository.state.HEAD.commit = 'local';
+    repository.log.mockResolvedValue([{
+      hash: 'mergeabc',
+      message: 'Merge origin/main',
+      parents: ['origin', 'personal'],
+    }]);
+    const service = new GitStatusService();
+
+    await expect(service.push(
+      uri('file:///study') as never,
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }],
+    )).rejects.toThrow('공식 main이 아닌 merge 히스토리');
+
+    expect(repository.push).not.toHaveBeenCalled();
     service.dispose();
   });
 
@@ -792,6 +1142,30 @@ describe('GitStatusService submission actions', () => {
       { remote: 'upstream', ref: 'main', prune: true },
     );
     expect(repository.merge).toHaveBeenCalledWith('upstream/main');
+    expect(repository.push).toHaveBeenCalledWith('origin', 'main', false);
+    service.dispose();
+  });
+
+  it('merges an existing canonical remote that is not named upstream', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    useCanonicalRemote(repository, 'official');
+    repository.state.refs.find(({ name }) => name === 'official/main')!.commit = 'canonical';
+    vi.stubGlobal('fetch', vi.fn(async () => githubResponse({
+      fork: true,
+      source: { full_name: 'DaleStudy/leetcode-study' },
+    })));
+    const service = new GitStatusService();
+
+    await service.syncFork(uri('file:///study') as never);
+
+    expect(repository.addRemote).not.toHaveBeenCalled();
+    expect(repository.fetch).toHaveBeenCalledWith({
+      remote: 'official',
+      ref: 'main',
+      prune: true,
+    });
+    expect(repository.merge).toHaveBeenCalledWith('official/main');
+    expect(repository.merge).not.toHaveBeenCalledWith('upstream/main');
     expect(repository.push).toHaveBeenCalledWith('origin', 'main', false);
     service.dispose();
   });

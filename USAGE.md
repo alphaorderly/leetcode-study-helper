@@ -60,7 +60,7 @@ origin  https://github.com/<github-id>/leetcode-study.git (fetch)
 origin  https://github.com/<github-id>/leetcode-study.git (push)
 ```
 
-`upstream`은 없어도 됩니다. **포크 동기화**를 처음 실행할 때 기존 `upstream`이 없다면 확장이 `https://github.com/DaleStudy/leetcode-study.git`을 추가합니다. 이미 있는 `upstream`이 다른 저장소를 가리키면 안전을 위해 동기화를 중단합니다.
+공식 저장소 remote 이름은 `upstream`이 아니어도 됩니다. fetch 또는 push URL이 `DaleStudy/leetcode-study`이면 그 remote를 사용합니다. 그런 remote가 없으면 **포크 동기화**를 처음 실행할 때 `upstream`으로 `https://github.com/DaleStudy/leetcode-study.git`을 추가합니다. 이름이 `upstream`인데 다른 저장소를 가리키면 안전을 위해 동기화를 중단합니다.
 
 워크스페이스 루트에는 다음 항목이 있어야 합니다.
 
@@ -205,7 +205,7 @@ Python 러너의 주요 제약은 다음과 같습니다.
 
 ## 7. 주차별로 제출하기
 
-제출 기능은 GitHub에서 `DaleStudy/leetcode-study`의 포크로 확인된 저장소에서 동작합니다. 새 주차는 동기화된 `main`에서 시작하고, 커밋 이후에는 해당 `week-XX` 브랜치에서 이어집니다.
+제출 기능은 GitHub에서 `DaleStudy/leetcode-study`의 포크로 확인된 저장소에서 동작합니다. 새 주차 브랜치는 공식 `main` tip에서 만들고, 커밋 이후에는 해당 `week-XX` 브랜치에서 이어집니다. 포크 `main`이 공식 저장소보다 앞서 있어도(GitHub Sync merge 등) 주차 브랜치의 기준은 공식 `main`입니다.
 
 ### 1단계: 커밋에 추가
 
@@ -225,21 +225,21 @@ Python 러너의 주요 제약은 다음과 같습니다.
 [study-user] WEEK 01 Solutions
 ```
 
-메시지를 확인하고 **이 주차 커밋**을 누릅니다. 확장은 `week-01` 형식의 브랜치를 자동으로 생성하고 전환한 뒤 커밋합니다. 같은 이름의 브랜치가 이미 있으면 로컬·원격 tip이 일치하고 해당 주차 풀이만 포함된 경우에만 재사용합니다.
+메시지를 확인하고 **이 주차 커밋**을 누릅니다. 확장은 `week-01` 형식의 브랜치를 공식 `main` tip에서 자동으로 생성하고 전환한 뒤 커밋합니다. 같은 이름의 브랜치가 이미 있으면 로컬·원격 tip이 일치하고, 공식 `main` tip을 포함하며, 해당 주차 풀이만 있는 경우에만 재사용합니다. 공식 `main`에 없는 과거 커밋이나 merge가 섞인 `week-XX`는 자동 rebase하지 않고 재사용을 거부합니다.
 
 커밋 직전에는 다음 조건을 다시 검사합니다.
 
 - 실제 Git index가 화면의 풀이 목록과 정확히 일치하는지
-- `main`, `origin/main`, `upstream/main`이 동기화되어 있는지
-- 기존 주차 브랜치가 현재 `main`에서 이어지고 다른 주차나 풀이 외 변경을 포함하지 않는지
+- `main`이 `origin/main`과 같고 공식 `main`을 포함하는지
+- 기존 주차 브랜치가 공식 `main`에서 이어지고, `공식 main..HEAD` 범위에 다른 주차·풀이 외 변경·merge 커밋이 없는지
 
 ### 3단계: origin에 push
 
 로컬 커밋이 생기면 `origin/week-XX` 노드에 **origin에 push** 버튼이 표시됩니다. push 전에는 다음 조건을 다시 확인합니다.
 
 - 현재 브랜치가 활성 주차와 일치하는 `week-XX`인지
-- 최초 push는 `main..HEAD`, 후속 push는 `origin/week-XX..HEAD` 범위가 안전한지
-- 모든 미푸시 커밋이 같은 주차의 풀이만 포함하는지
+- 최초 push는 `공식 main..HEAD`, 후속 push는 `origin/week-XX..HEAD` 범위가 안전한지
+- 그 범위에 merge 커밋이 없고, 모든 미푸시 커밋이 같은 주차의 풀이만 포함하는지
 - 다른 주차나 풀이 외 파일이 섞이지 않았는지
 
 조건을 만족하면 일반 push를 실행합니다. force push는 사용하지 않습니다.
@@ -278,8 +278,8 @@ PR이 병합되고 주차 브랜치에 변경이나 미푸시 커밋이 없으�
 
 1. `origin/main`을 fetch합니다.
 2. 로컬 `main`이 `origin/main`보다 뒤처졌다면 먼저 병합합니다.
-3. `upstream`이 없으면 공식 저장소 URL로 추가합니다.
-4. `upstream/main`을 fetch하고 필요한 경우 병합합니다.
+3. 공식 저장소를 가리키는 remote가 없으면 `upstream`으로 추가하고, 이미 있으면 그 이름을 사용합니다.
+4. 해당 remote의 `main`을 fetch하고 필요한 경우 병합합니다.
 5. 결과가 `origin/main`에서 이어지는지 확인합니다.
 6. upstream 추적 설정이 없다면 `main → origin/main`으로 설정합니다.
 7. 일반 push로 `origin/main`을 갱신합니다.
@@ -299,7 +299,8 @@ PR이 병합되고 주차 브랜치에 변경이나 미푸시 커밋이 없으�
 | `풀이 외 파일이 스테이징되어 있습니다` | Source Control에서 풀이가 아닌 파일을 스테이징 해제한 뒤 새로고침합니다. |
 | `공식 저장소에 반영되지 않은 풀이가 여러 주차에 걸쳐 있습니다` | 기존 주차의 PR과 병합을 먼저 완료합니다. 확장은 여러 주차를 자동으로 합치지 않습니다. |
 | `main이 origin/main과 다릅니다` / `main이 공식 저장소보다 뒤처져 있습니다` | 스테이징을 해제하고 `main`에서 **포크 동기화**를 실행한 뒤 다시 커밋에 추가합니다. |
-| 기존 `week-XX` 브랜치를 자동 재사용할 수 없음 | 로컬·원격 branch tip과 `main` 조상 관계를 직접 정리한 뒤 다시 시도합니다. 확장은 force checkout이나 reset을 하지 않습니다. |
+| 기존 `week-XX` 브랜치를 자동 재사용할 수 없음 | 로컬·원격 tip이 일치하고 공식 `main`에서 이어지며 해당 주차 풀이만 포함해야 합니다. 오염된 브랜치는 자동 rebase하지 않으므로, 공식 `main` tip에서 새로 만든 뒤 해당 주차만 다시 커밋합니다. |
+| `공식 main이 아닌 merge 히스토리가 포함` | GitHub Sync merge 등으로 더러워진 주차 브랜치입니다. 확장은 rebase하거나 fork `main`을 force-reset하지 않습니다. 공식 `main` tip에서 새 브랜치를 만들어 해당 주차만 다시 커밋합니다. |
 | **main으로 돌아가 동기화**가 비활성화됨 | PR 병합 여부와 주차 브랜치의 스테이징·작업 트리·미푸시 커밋을 확인합니다. |
 | 포크 동기화 버튼이 비활성화됨 | 스테이징·추적 파일 수정, 미푸시 커밋, merge·rebase 상태를 먼저 정리합니다. untracked 풀이만 있는 경우에는 막히지 않습니다. |
 | Python 테스트를 사용할 수 없음 | 지원 문제인지, 파일이 Python인지, 실행 파일 경로가 유효한지, 필요한 문제별 객체가 정의됐는지 확인합니다. |

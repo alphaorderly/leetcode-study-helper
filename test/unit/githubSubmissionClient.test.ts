@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { GitHubSubmissionClient } from '../../src/git/githubSubmissionClient';
+import {
+  GitHubSubmissionClient,
+  resolveCanonicalRemoteName,
+} from '../../src/git/githubSubmissionClient';
 
 function response(body: unknown): Response {
   return {
@@ -16,6 +19,47 @@ function errorResponse(status: number): Response {
     json: async () => ({ message: 'error' }),
   } as Response;
 }
+
+const CANONICAL_URL = 'https://github.com/DaleStudy/leetcode-study.git';
+
+describe('resolveCanonicalRemoteName', () => {
+  it('returns undefined when no remote points at the canonical repository', () => {
+    expect(resolveCanonicalRemoteName([{
+      name: 'origin',
+      fetchUrl: 'https://github.com/CaseUser/leetcode-study.git',
+    }])).toBeUndefined();
+  });
+
+  it('finds a canonical remote even when it is not named upstream', () => {
+    expect(resolveCanonicalRemoteName([{
+      name: 'origin',
+      fetchUrl: 'https://github.com/CaseUser/leetcode-study.git',
+    }, {
+      name: 'official',
+      fetchUrl: CANONICAL_URL,
+    }])).toBe('official');
+  });
+
+  it('prefers the remote named upstream when several URLs are canonical', () => {
+    expect(resolveCanonicalRemoteName([{
+      name: 'official',
+      fetchUrl: CANONICAL_URL,
+    }, {
+      name: 'upstream',
+      fetchUrl: 'git@github.com:DaleStudy/leetcode-study.git',
+    }])).toBe('upstream');
+  });
+
+  it('rejects a remote named upstream that does not point at the canonical repository', () => {
+    expect(() => resolveCanonicalRemoteName([{
+      name: 'official',
+      fetchUrl: CANONICAL_URL,
+    }, {
+      name: 'upstream',
+      fetchUrl: 'https://github.com/OtherOrg/leetcode-study.git',
+    }])).toThrow('기존 upstream이 DaleStudy/leetcode-study를 가리키지 않습니다.');
+  });
+});
 
 const remote = {
   owner: 'CaseUser',

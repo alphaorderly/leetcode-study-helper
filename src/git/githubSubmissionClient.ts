@@ -127,6 +127,27 @@ export function isCanonicalRemote(url: string | undefined): boolean {
     && parsed.repository.toLowerCase() === CANONICAL_REPOSITORY.toLowerCase();
 }
 
+export function resolveCanonicalRemoteName(
+  remotes: readonly GitRemote[],
+): string | undefined {
+  const namedUpstream = remotes.find(({ name }) => name === 'upstream');
+  if (
+    namedUpstream
+    && !isCanonicalRemote(namedUpstream.fetchUrl ?? namedUpstream.pushUrl)
+  ) {
+    throw new Error('기존 upstream이 DaleStudy/leetcode-study를 가리키지 않습니다.');
+  }
+  const canonicalNames = remotes.flatMap((remote) =>
+    isCanonicalRemote(remote.fetchUrl) || isCanonicalRemote(remote.pushUrl)
+      ? [remote.name]
+      : []
+  );
+  if (canonicalNames.includes('upstream')) {
+    return 'upstream';
+  }
+  return canonicalNames[0];
+}
+
 export class GitHubRequestError extends Error {
   readonly status: number;
   readonly usedAuth: boolean;

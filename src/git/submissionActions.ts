@@ -6,14 +6,15 @@ import type {
 import {
   CANONICAL_REMOTE_URL,
   type GitHubSubmissionClient,
-  isCanonicalRemote,
   parseConsistentRemote,
   pullRequestStatus,
+  resolveCanonicalRemoteName,
 } from './githubSubmissionClient';
 import { buildPullRequestBody, buildPullRequestCompareUrl } from './pullRequestBody';
 import { getRefRelation } from './refRelation';
 import { weekBranchName, weekFromBranch } from './submissionModel';
 import {
+  type GitCommit,
   type GitRepository,
   type GitRepositoryAdapter,
   relativeChangePaths,
@@ -142,8 +143,14 @@ export class SubmissionActions {
     }
     const fileByPath = this.fileByPath(repository, solutions);
     if (currentBranch === 'main') {
-      await this.requireSynchronizedMain(repository);
-      await this.checkoutSubmissionBranch(repository, submissionBranch, week, fileByPath);
+      const canonicalMain = await this.requireSynchronizedMain(repository);
+      await this.checkoutSubmissionBranch(
+        repository,
+        submissionBranch,
+        week,
+        fileByPath,
+        canonicalMain,
+      );
       const refreshedIndexPaths = relativeChangePaths(
         repository.rootUri,
         repository.state.indexChanges,
@@ -152,9 +159,10 @@ export class SubmissionActions {
         throw new Error('브랜치 전환 중 스테이징 상태가 변경되어 커밋하지 않았습니다.');
       }
     } else {
+      const canonicalMain = await this.fetchCanonicalMain(repository);
       await this.requireSafeSubmissionHistory(
         repository,
-        'main',
+        canonicalMain,
         'HEAD',
         week,
         fileByPath,
@@ -177,7 +185,10 @@ export class SubmissionActions {
     if (!submissionBranch || !branchWeek) {
       throw new Error('push는 week-XX 제출 브랜치에서만 실행할 수 있습니다.');
     }
+    const canonicalRemote = this.requireCanonicalRemoteName(repository);
+    const canonicalMain = `${canonicalRemote}/main`;
     await repository.fetch({ remote: 'origin', prune: true });
+    await repository.fetch({ remote: canonicalRemote, ref: 'main', prune: true });
     await repository.status();
     this.requireCleanOperationState(repository);
     const remoteBranch = await this.getBranch(repository, `origin/${submissionBranch}`);
@@ -195,7 +206,7 @@ export class SubmissionActions {
     }
 
     const fileByPath = this.fileByPath(repository, solutions);
-    const baseRef = remoteBranch ? `origin/${submissionBranch}` : 'main';
+    const baseRef = remoteBranch ? `origin/${submissionBranch}` : canonicalMain;
     const pendingCommits = await repository.log({
       range: `${baseRef}..HEAD`,
       reverse: true,
@@ -209,6 +220,7 @@ export class SubmissionActions {
     }
     const pendingWeeks = new Set<number>();
     for (const commit of pendingCommits) {
+      rejectMergeCommit(commit);
       const parent = commit.parents[0];
       if (!parent) {
         throw new Error(`커밋 ${commit.hash.slice(0, 7)}의 변경 범위를 확인할 수 없습니다.`);
@@ -314,20 +326,19 @@ export class SubmissionActions {
       await this.mergeOrAbort(repository, 'origin/main');
     }
 
-    const upstream = repository.state.remotes.find(({ name }) => name === 'upstream');
-    if (upstream && !isCanonicalRemote(upstream.fetchUrl ?? upstream.pushUrl)) {
-      throw new Error('기존 upstream이 DaleStudy/leetcode-study를 가리키지 않습니다.');
-    }
-    if (!upstream) {
+    let canonicalRemote = resolveCanonicalRemoteName(repository.state.remotes);
+    if (!canonicalRemote) {
       await repository.addRemote('upstream', CANONICAL_REMOTE_URL);
+      canonicalRemote = 'upstream';
     }
-    await repository.fetch({ remote: 'upstream', ref: 'main', prune: true });
+    await repository.fetch({ remote: canonicalRemote, ref: 'main', prune: true });
     await repository.status();
     this.requireCleanOperationState(repository);
 
-    const upstreamRelation = await getRefRelation(repository, 'upstream/main');
-    if (upstreamRelation === 'behind' || upstreamRelation === 'diverged') {
-      await this.mergeOrAbort(repository, 'upstream/main');
+    const canonicalMain = `${canonicalRemote}/main`;
+    const canonicalRelation = await getRefRelation(repository, canonicalMain);
+    if (canonicalRelation === 'behind' || canonicalRelation === 'diverged') {
+      await this.mergeOrAbort(repository, canonicalMain);
     }
     const finalOriginRelation = await getRefRelation(repository, 'origin/main');
     if (finalOriginRelation !== 'equal' && finalOriginRelation !== 'ahead') {
@@ -446,28 +457,47 @@ export class SubmissionActions {
     return origin;
   }
 
-  private async requireSynchronizedMain(repository: GitRepository): Promise<void> {
+  private async requireSynchronizedMain(repository: GitRepository): Promise<string> {
     if (repository.state.HEAD?.name !== 'main') {
       throw new Error('새 주차 브랜치는 main에서만 만들 수 있습니다.');
     }
-    const upstream = repository.state.remotes.find(({ name }) => name === 'upstream');
-    if (!upstream || !isCanonicalRemote(upstream.fetchUrl ?? upstream.pushUrl)) {
+    const remoteName = resolveCanonicalRemoteName(repository.state.remotes);
+    if (!remoteName) {
       throw new Error('새 주차를 시작하기 전에 main에서 포크 동기화를 실행해 주세요.');
     }
     await repository.fetch({ remote: 'origin', prune: true });
-    await repository.fetch({ remote: 'upstream', ref: 'main', prune: true });
+    await repository.fetch({ remote: remoteName, ref: 'main', prune: true });
     await repository.status();
-    const [originRelation, upstreamRelation] = await Promise.all([
+    const canonicalMain = `${remoteName}/main`;
+    const [originRelation, canonicalRelation] = await Promise.all([
       getRefRelation(repository, 'origin/main'),
-      getRefRelation(repository, 'upstream/main'),
+      getRefRelation(repository, canonicalMain),
     ]);
     if (originRelation !== 'equal') {
       throw new Error('main이 origin/main과 다릅니다. 포크 동기화를 먼저 실행해 주세요.');
     }
     // equal: 동일 SHA. ahead: 공식 main을 이미 포함한 포크(merge 커밋 등).
-    if (upstreamRelation === 'behind' || upstreamRelation === 'diverged') {
+    if (canonicalRelation === 'behind' || canonicalRelation === 'diverged') {
       throw new Error('main이 공식 저장소보다 뒤처져 있습니다. 포크 동기화를 먼저 실행해 주세요.');
     }
+    return canonicalMain;
+  }
+
+  private requireCanonicalRemoteName(repository: GitRepository): string {
+    const remoteName = resolveCanonicalRemoteName(repository.state.remotes);
+    if (!remoteName) {
+      throw new Error(
+        '공식 저장소 remote가 없습니다. main에서 포크 동기화를 먼저 실행해 주세요.',
+      );
+    }
+    return remoteName;
+  }
+
+  private async fetchCanonicalMain(repository: GitRepository): Promise<string> {
+    const remoteName = this.requireCanonicalRemoteName(repository);
+    await repository.fetch({ remote: remoteName, ref: 'main', prune: true });
+    await repository.status();
+    return `${remoteName}/main`;
   }
 
   private async checkoutSubmissionBranch(
@@ -475,6 +505,7 @@ export class SubmissionActions {
     branch: string,
     week: number,
     fileByPath: ReadonlyMap<string, SubmissionSolution>,
+    canonicalMain: string,
   ): Promise<void> {
     const localBranch = await this.getBranch(repository, branch);
     const remoteBranch = await this.getBranch(repository, `origin/${branch}`);
@@ -485,16 +516,18 @@ export class SubmissionActions {
       ? branch
       : remoteBranch ? `origin/${branch}` : undefined;
     if (existingRef) {
-      const [mainCommit, mergeBase] = await Promise.all([
-        repository.getCommit('main'),
-        repository.getMergeBase('main', existingRef),
+      const [canonicalCommit, mergeBase] = await Promise.all([
+        repository.getCommit(canonicalMain),
+        repository.getMergeBase(canonicalMain, existingRef),
       ]);
-      if (mergeBase !== mainCommit.hash) {
-        throw new Error(`${branch}가 현재 main에서 이어지지 않아 자동 재사용할 수 없습니다.`);
+      if (mergeBase !== canonicalCommit.hash) {
+        throw new Error(
+          `${branch}가 현재 공식 main에서 이어지지 않아 자동 재사용할 수 없습니다.`,
+        );
       }
       await this.requireSafeSubmissionHistory(
         repository,
-        'main',
+        canonicalMain,
         existingRef,
         week,
         fileByPath,
@@ -503,7 +536,7 @@ export class SubmissionActions {
     if (localBranch) {
       await repository.checkout(branch);
     } else {
-      await repository.createBranch(branch, true, existingRef ?? 'main');
+      await repository.createBranch(branch, true, existingRef ?? canonicalMain);
       if (remoteBranch) {
         await repository.setBranchUpstream(branch, `origin/${branch}`);
       }
@@ -534,6 +567,7 @@ export class SubmissionActions {
       throw new Error(`${headRef}의 커밋이 너무 많아 자동으로 검증할 수 없습니다.`);
     }
     for (const commit of commits) {
+      rejectMergeCommit(commit);
       const parent = commit.parents[0];
       if (!parent) {
         throw new Error(`커밋 ${commit.hash.slice(0, 7)}의 변경 범위를 확인할 수 없습니다.`);
@@ -582,17 +616,19 @@ export class SubmissionActions {
       }),
     );
     const branches = new Set([...localRefs.keys(), ...remoteRefs.keys()]);
-    for (const branch of branches) {
-      if (branch === desiredBranch) {
-        continue;
-      }
+    const otherBranches = [...branches].filter((branch) => branch !== desiredBranch);
+    if (otherBranches.length === 0) {
+      return;
+    }
+    const canonicalMain = `${this.requireCanonicalRemoteName(repository)}/main`;
+    for (const branch of otherBranches) {
       const local = localRefs.get(branch);
       const remote = remoteRefs.get(branch);
       if (local && (!remote || local.commit !== remote.commit)) {
         throw new Error(`${branch}에 push되지 않은 로컬 변경이 있어 새 주차를 시작할 수 없습니다.`);
       }
       const ref = remote ? `origin/${branch}` : branch;
-      const mergeBase = await repository.getMergeBase('upstream/main', ref);
+      const mergeBase = await repository.getMergeBase(canonicalMain, ref);
       if (!mergeBase) {
         throw new Error(`${branch}의 공식 main 기준점을 확인할 수 없습니다.`);
       }
@@ -642,4 +678,12 @@ export class SubmissionActions {
 
 function setsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
   return left.size === right.size && [...left].every((value) => right.has(value));
+}
+
+function rejectMergeCommit(commit: GitCommit): void {
+  if (commit.parents.length > 1) {
+    throw new Error(
+      `커밋 ${commit.hash.slice(0, 7)}에 공식 main이 아닌 merge 히스토리가 포함되어 있습니다.`,
+    );
+  }
 }

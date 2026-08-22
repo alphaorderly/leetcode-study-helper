@@ -2,7 +2,7 @@
   "name": "leetcode-study-helper",
   "displayName": "리트코드 스터디 도우미",
   "description": "DaleStudy 리트코드 워크스페이스에서 풀이를 관리하고 주차별 PR로 제출합니다.",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "publisher": "alphaorderly",
   "license": "MIT",
   "icon": "media/extension-icon.png",
