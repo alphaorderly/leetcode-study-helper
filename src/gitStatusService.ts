@@ -418,7 +418,7 @@ export class GitStatusService implements vscode.Disposable {
       Boolean(repository.state.rebaseCommit),
       hasBlockingOriginCommits,
     );
-    let hasCanonicalRemote = false;
+    let hasCanonicalRemote: boolean;
     try {
       hasCanonicalRemote = resolveCanonicalRemoteName(repository.state.remotes) !== undefined;
     } catch {
