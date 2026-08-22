@@ -196,7 +196,16 @@ function createRepository() {
     mergeAbort: vi.fn(async () => {
       state.mergeChanges = [];
     }),
-    addRemote: vi.fn(async () => {}),
+    addRemote: vi.fn(async (name: string, url: string) => {
+      state.remotes.push({ name, fetchUrl: url, pushUrl: undefined });
+      if (!state.refs.some((ref) => ref.name === `${name}/main`)) {
+        state.refs.push({
+          name: `${name}/main`,
+          commit: state.HEAD.commit,
+          remote: name,
+        });
+      }
+    }),
     setBranchUpstream: vi.fn(async () => {}),
     status: vi.fn(async () => {}),
   };
@@ -357,7 +366,64 @@ describe('GitStatusService submission actions', () => {
         slug: 'two-sum',
         week: 1,
       }],
-    )).rejects.toThrow('포크 동기화를 먼저');
+    )).rejects.toThrow('포크 동기화');
+
+    expect(repository.add).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('adds a missing canonical remote before staging the first solution', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.remotes = repository.state.remotes.filter(
+      ({ name }) => name !== 'upstream',
+    );
+    repository.state.refs = repository.state.refs.filter(
+      ({ name }) => name !== 'upstream/main',
+    );
+    const service = new GitStatusService();
+
+    await service.stageSolution(
+      uri('file:///study') as never,
+      uri('file:///study/two-sum/CaseUser.py') as never,
+      1,
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }],
+    );
+
+    expect(repository.addRemote).toHaveBeenCalledWith(
+      'upstream',
+      'https://github.com/DaleStudy/leetcode-study.git',
+    );
+    expect(repository.add).toHaveBeenCalledWith(['/study/two-sum/CaseUser.py']);
+    service.dispose();
+  });
+
+  it('still requires fork sync when official main is ahead of the fork', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.refs.find(({ name }) => name === 'upstream/main')!.commit = 'newer';
+    repository.getMergeBase.mockImplementation(async (_ref1: string, ref2: string) => {
+      if (ref2 === 'upstream/main' || ref2 === 'origin/main') {
+        return 'origin';
+      }
+      return 'origin';
+    });
+    const service = new GitStatusService();
+
+    await expect(service.stageSolution(
+      uri('file:///study') as never,
+      uri('file:///study/two-sum/CaseUser.py') as never,
+      1,
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }],
+    )).rejects.toThrow('제출 탭 오른쪽 위 ‘포크 동기화’');
 
     expect(repository.add).not.toHaveBeenCalled();
     service.dispose();
@@ -1090,6 +1156,8 @@ describe('GitStatusService submission actions', () => {
       },
       canSync: false,
       canReturnToMain: false,
+      hasCanonicalRemote: true,
+      behindOfficialMain: false,
     };
 
     await service.openPullRequest(submission, 'CaseUser');
@@ -1319,6 +1387,8 @@ describe('GitStatusService submission actions', () => {
     );
 
     expect(result.submission?.canSync).toBe(false);
+    expect(result.submission?.syncDisabledReason)
+      .toBe('origin에 push하지 않은 로컬 커밋을 먼저 처리해 주세요.');
     service.dispose();
   });
 
@@ -1361,6 +1431,81 @@ describe('GitStatusService submission actions', () => {
     );
 
     expect(result.submission?.canSync).toBe(true);
+    expect(result.submission?.hasCanonicalRemote).toBe(true);
+    expect(result.submission?.behindOfficialMain).toBe(false);
+    expect(result.submission?.syncDisabledReason).toBeUndefined();
+    service.dispose();
+  });
+
+  it('reports a missing canonical remote without adding it during status', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.remotes = repository.state.remotes.filter(
+      ({ name }) => name !== 'upstream',
+    );
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({ ahead_by: 0, behind_by: 0, files: [], commits: [] });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({ truncated: false, tree: [] });
+      }
+      return githubResponse([]);
+    }));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(result.submission?.hasCanonicalRemote).toBe(false);
+    expect(repository.addRemote).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('marks the fork behind official main from the GitHub compare', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/compare/main...CaseUser:main')) {
+        return githubResponse({ ahead_by: 0, behind_by: 4, files: [], commits: [] });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({ ahead_by: 0, behind_by: 0, files: [], commits: [] });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({ truncated: false, tree: [] });
+      }
+      return githubResponse([]);
+    }));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(result.submission?.behindOfficialMain).toBe(true);
     service.dispose();
   });
 

@@ -179,6 +179,8 @@ function submission(
     },
     canSync: false,
     canReturnToMain: false,
+    hasCanonicalRemote: true,
+    behindOfficialMain: false,
     ...overrides,
   };
 }

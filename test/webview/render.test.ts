@@ -153,6 +153,8 @@ function submissionSnapshot(): ExtensionSnapshot {
         },
         canSync: false,
         canReturnToMain: false,
+        hasCanonicalRemote: true,
+        behindOfficialMain: false,
       },
       problems: [{
         ...problem,
@@ -822,6 +824,68 @@ describe('webview rendering', () => {
         ({ textContent }) => textContent === 'GitHub으로 로그인',
       ),
     ).toBe(false);
+  });
+
+  it('shows a connect CTA when the official remote is missing', () => {
+    const post = vi.fn();
+    ui.viewMode = 'submission';
+    const state = submissionSnapshot();
+    const empty: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          hasCanonicalRemote: false,
+          behindOfficialMain: false,
+          stagedFiles: [],
+          pendingCommits: [],
+          forkFiles: [],
+          otherForkFiles: [],
+          otherStagedFiles: [],
+          activePullRequest: undefined,
+          pullRequest: undefined,
+          canSync: true,
+        },
+      })),
+    };
+
+    renderApp(root, empty, ui, post);
+
+    expect(root.textContent).toContain('공식 DaleStudy 저장소와 맞춰야');
+    const button = [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .find(({ textContent }) => textContent === '공식 저장소 연결');
+    expect(button).toBeDefined();
+    expect(button?.disabled).toBe(false);
+    button?.click();
+    expect(post).toHaveBeenCalledWith({
+      type: 'syncFork',
+      rootUri: 'file:///study-a',
+    });
+  });
+
+  it('uses the specific sync-disabled reason as the fork sync tooltip', () => {
+    ui.viewMode = 'submission';
+    const state = submissionSnapshot();
+    const onWeekBranch: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          branch: 'week-01',
+          canSync: false,
+          syncDisabledReason: '포크 동기화는 main 브랜치에서만 실행할 수 있습니다.',
+        },
+      })),
+    };
+
+    renderApp(root, onWeekBranch, ui, vi.fn());
+
+    const syncButton = [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .find(({ textContent }) => textContent === '포크 동기화');
+    expect(syncButton?.disabled).toBe(true);
+    expect(syncButton?.title).toBe('포크 동기화는 main 브랜치에서만 실행할 수 있습니다.');
   });
 
   it('removes merged files from the submission graph while keeping the card badge', () => {

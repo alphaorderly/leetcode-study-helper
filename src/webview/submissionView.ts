@@ -125,6 +125,27 @@ function renderSubmissionGraph(
     || submission.otherForkFiles.length > 0
     || Boolean(pullRequestSnapshot);
   if (!hasGraphContent) {
+    if (!submission.hasCanonicalRemote || submission.behindOfficialMain) {
+      const region = element('div', 'submission-auth');
+      region.append(element(
+        'p',
+        'empty-state',
+        '공식 DaleStudy 저장소와 맞춰야 주차 제출을 시작할 수 있습니다.',
+      ));
+      const button = element('button', 'primary-button', '공식 저장소 연결');
+      button.type = 'button';
+      button.disabled = ui.busy || !submission.canSync;
+      if (!submission.canSync) {
+        button.title = submission.syncDisabledReason
+          ?? '스테이징·추적 파일 수정과 미푸시 커밋을 먼저 정리해 주세요.';
+      }
+      button.addEventListener('click', () =>
+        post({ type: 'syncFork', rootUri: repository.rootUri })
+      );
+      region.append(button);
+      graph.append(region);
+      return graph;
+    }
     graph.append(element(
       'p',
       'empty-state submission-empty',
@@ -322,9 +343,10 @@ export function renderSubmissionView(
   );
   syncButton.type = 'button';
   syncButton.disabled = ui.busy || !repository.submission?.canSync;
-  if (!repository.submission?.canSync) {
-    syncButton.title = '스테이징·추적 파일 수정과 미푸시 커밋을 먼저 정리해 주세요.';
-  }
+  syncButton.title = repository.submission?.canSync
+    ? '공식 main 가져오기'
+    : repository.submission?.syncDisabledReason
+      ?? '스테이징·추적 파일 수정과 미푸시 커밋을 먼저 정리해 주세요.';
   syncButton.addEventListener('click', () =>
     post({ type: 'syncFork', rootUri: repository.rootUri })
   );

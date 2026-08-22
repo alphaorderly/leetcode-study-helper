@@ -114,6 +114,9 @@ export interface RepositorySubmissionSnapshot {
   summary: SubmissionSummary;
   canSync: boolean;
   canReturnToMain: boolean;
+  hasCanonicalRemote: boolean;
+  behindOfficialMain: boolean;
+  syncDisabledReason?: string;
 }
 
 export interface ProblemTopicTag {

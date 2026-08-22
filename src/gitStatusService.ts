@@ -12,6 +12,7 @@ import {
   githubRequestNeedsSignIn,
   parseConsistentRemote,
   pullRequestStatus,
+  resolveCanonicalRemoteName,
   type GitHubCompareCommit,
   type RemoteSubmissionState,
 } from './git/githubSubmissionClient';
@@ -160,6 +161,8 @@ export class GitStatusService implements vscode.Disposable {
           summary: summaryForStatuses(submissionStatuses),
           canSync: false,
           canReturnToMain: false,
+          hasCanonicalRemote: false,
+          behindOfficialMain: false,
         },
       };
     }
@@ -288,6 +291,8 @@ export class GitStatusService implements vscode.Disposable {
         summary: summaryForStatuses(statuses),
         canSync: false,
         canReturnToMain: false,
+        hasCanonicalRemote: false,
+        behindOfficialMain: false,
       };
       return { statuses, pullRequestNumbers: new Map(), snapshot };
     }
@@ -328,6 +333,8 @@ export class GitStatusService implements vscode.Disposable {
         summary: summaryForStatuses(statuses),
         canSync: false,
         canReturnToMain: false,
+        hasCanonicalRemote: false,
+        behindOfficialMain: false,
       };
       return { statuses, pullRequestNumbers: new Map(), snapshot };
     }
@@ -405,6 +412,18 @@ export class GitStatusService implements vscode.Disposable {
       && !hasDirtyTrackedState
       && !repository.state.rebaseCommit
       && !hasBlockingOriginCommits;
+    const syncDisabledReason = describeSyncDisabledReason(
+      branch,
+      hasDirtyTrackedState,
+      Boolean(repository.state.rebaseCommit),
+      hasBlockingOriginCommits,
+    );
+    let hasCanonicalRemote = false;
+    try {
+      hasCanonicalRemote = resolveCanonicalRemoteName(repository.state.remotes) !== undefined;
+    } catch {
+      hasCanonicalRemote = false;
+    }
     const latestPullRequestStatus = remote.latestPullRequest
       ? pullRequestStatus(remote.latestPullRequest)
       : undefined;
@@ -461,6 +480,9 @@ export class GitStatusService implements vscode.Disposable {
       summary: summaryForStatuses(statuses),
       canSync,
       canReturnToMain,
+      hasCanonicalRemote,
+      behindOfficialMain: remote.behindBy > 0,
+      syncDisabledReason,
     };
     return { statuses, pullRequestNumbers, snapshot };
   }
@@ -555,4 +577,25 @@ export class GitStatusService implements vscode.Disposable {
     };
   }
 
+}
+
+function describeSyncDisabledReason(
+  branch: string | undefined,
+  hasDirtyTrackedState: boolean,
+  rebaseInProgress: boolean,
+  hasBlockingOriginCommits: boolean,
+): string | undefined {
+  if (branch !== 'main') {
+    return '포크 동기화는 main 브랜치에서만 실행할 수 있습니다.';
+  }
+  if (rebaseInProgress) {
+    return '진행 중인 merge 또는 rebase를 먼저 정리해 주세요.';
+  }
+  if (hasDirtyTrackedState) {
+    return '스테이징 또는 추적 파일 변경을 먼저 정리해 주세요.';
+  }
+  if (hasBlockingOriginCommits) {
+    return 'origin에 push하지 않은 로컬 커밋을 먼저 처리해 주세요.';
+  }
+  return undefined;
 }

@@ -185,10 +185,8 @@ export class SubmissionActions {
     if (!submissionBranch || !branchWeek) {
       throw new Error('push는 week-XX 제출 브랜치에서만 실행할 수 있습니다.');
     }
-    const canonicalRemote = this.requireCanonicalRemoteName(repository);
-    const canonicalMain = `${canonicalRemote}/main`;
+    const canonicalMain = await this.fetchCanonicalMain(repository);
     await repository.fetch({ remote: 'origin', prune: true });
-    await repository.fetch({ remote: canonicalRemote, ref: 'main', prune: true });
     await repository.status();
     this.requireCleanOperationState(repository);
     const remoteBranch = await this.getBranch(repository, `origin/${submissionBranch}`);
@@ -326,11 +324,7 @@ export class SubmissionActions {
       await this.mergeOrAbort(repository, 'origin/main');
     }
 
-    let canonicalRemote = resolveCanonicalRemoteName(repository.state.remotes);
-    if (!canonicalRemote) {
-      await repository.addRemote('upstream', CANONICAL_REMOTE_URL);
-      canonicalRemote = 'upstream';
-    }
+    const canonicalRemote = await this.ensureCanonicalRemote(repository);
     await repository.fetch({ remote: canonicalRemote, ref: 'main', prune: true });
     await repository.status();
     this.requireCleanOperationState(repository);
@@ -461,10 +455,7 @@ export class SubmissionActions {
     if (repository.state.HEAD?.name !== 'main') {
       throw new Error('새 주차 브랜치는 main에서만 만들 수 있습니다.');
     }
-    const remoteName = resolveCanonicalRemoteName(repository.state.remotes);
-    if (!remoteName) {
-      throw new Error('새 주차를 시작하기 전에 main에서 포크 동기화를 실행해 주세요.');
-    }
+    const remoteName = await this.ensureCanonicalRemote(repository);
     await repository.fetch({ remote: 'origin', prune: true });
     await repository.fetch({ remote: remoteName, ref: 'main', prune: true });
     await repository.status();
@@ -474,27 +465,31 @@ export class SubmissionActions {
       getRefRelation(repository, canonicalMain),
     ]);
     if (originRelation !== 'equal') {
-      throw new Error('main이 origin/main과 다릅니다. 포크 동기화를 먼저 실행해 주세요.');
+      throw new Error(
+        'main이 origin/main과 다릅니다. 제출 탭 오른쪽 위 ‘포크 동기화’를 눌러 주세요.',
+      );
     }
     // equal: 동일 SHA. ahead: 공식 main을 이미 포함한 포크(merge 커밋 등).
     if (canonicalRelation === 'behind' || canonicalRelation === 'diverged') {
-      throw new Error('main이 공식 저장소보다 뒤처져 있습니다. 포크 동기화를 먼저 실행해 주세요.');
+      throw new Error(
+        'main이 공식 저장소보다 뒤처져 있습니다. 제출 탭 오른쪽 위 ‘포크 동기화’를 눌러 주세요.',
+      );
     }
     return canonicalMain;
   }
 
-  private requireCanonicalRemoteName(repository: GitRepository): string {
-    const remoteName = resolveCanonicalRemoteName(repository.state.remotes);
-    if (!remoteName) {
-      throw new Error(
-        '공식 저장소 remote가 없습니다. main에서 포크 동기화를 먼저 실행해 주세요.',
-      );
+  private async ensureCanonicalRemote(repository: GitRepository): Promise<string> {
+    const existing = resolveCanonicalRemoteName(repository.state.remotes);
+    if (existing) {
+      return existing;
     }
-    return remoteName;
+    await repository.addRemote('upstream', CANONICAL_REMOTE_URL);
+    await repository.status();
+    return resolveCanonicalRemoteName(repository.state.remotes) ?? 'upstream';
   }
 
   private async fetchCanonicalMain(repository: GitRepository): Promise<string> {
-    const remoteName = this.requireCanonicalRemoteName(repository);
+    const remoteName = await this.ensureCanonicalRemote(repository);
     await repository.fetch({ remote: remoteName, ref: 'main', prune: true });
     await repository.status();
     return `${remoteName}/main`;
@@ -620,7 +615,7 @@ export class SubmissionActions {
     if (otherBranches.length === 0) {
       return;
     }
-    const canonicalMain = `${this.requireCanonicalRemoteName(repository)}/main`;
+    const canonicalMain = await this.fetchCanonicalMain(repository);
     for (const branch of otherBranches) {
       const local = localRefs.get(branch);
       const remote = remoteRefs.get(branch);

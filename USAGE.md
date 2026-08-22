@@ -60,7 +60,7 @@ origin  https://github.com/<github-id>/leetcode-study.git (fetch)
 origin  https://github.com/<github-id>/leetcode-study.git (push)
 ```
 
-공식 저장소 remote 이름은 `upstream`이 아니어도 됩니다. fetch 또는 push URL이 `DaleStudy/leetcode-study`이면 그 remote를 사용합니다. 그런 remote가 없으면 **포크 동기화**를 처음 실행할 때 `upstream`으로 `https://github.com/DaleStudy/leetcode-study.git`을 추가합니다. 이름이 `upstream`인데 다른 저장소를 가리키면 안전을 위해 동기화를 중단합니다.
+공식 저장소 remote 이름은 `upstream`이 아니어도 됩니다. fetch 또는 push URL이 `DaleStudy/leetcode-study`이면 그 remote를 사용합니다. 그런 remote가 없으면 **첫 주차 제출**이나 제출 탭의 **공식 저장소 연결**에서 `upstream`으로 `https://github.com/DaleStudy/leetcode-study.git`을 추가합니다. 이때 merge는 하지 않습니다. 포크가 공식 `main`보다 뒤처져 있으면 **포크 동기화**로 맞춥니다. 이름이 `upstream`인데 다른 저장소를 가리키면 안전을 위해 동기화를 중단합니다.
 
 워크스페이스 루트에는 다음 항목이 있어야 합니다.
 
@@ -205,7 +205,7 @@ Python 러너의 주요 제약은 다음과 같습니다.
 
 ## 7. 주차별로 제출하기
 
-제출 기능은 GitHub에서 `DaleStudy/leetcode-study`의 포크로 확인된 저장소에서 동작합니다. 새 주차 브랜치는 공식 `main` tip에서 만들고, 커밋 이후에는 해당 `week-XX` 브랜치에서 이어집니다. 포크 `main`이 공식 저장소보다 앞서 있어도(GitHub Sync merge 등) 주차 브랜치의 기준은 공식 `main`입니다.
+제출 기능은 GitHub에서 `DaleStudy/leetcode-study`의 포크로 확인된 저장소에서 동작합니다. 새 주차 브랜치는 공식 `main` tip에서 만들고, 커밋 이후에는 해당 `week-XX` 브랜치에서 이어집니다. 포크 `main`이 공식 저장소보다 앞서 있어도(GitHub Sync merge 등) 주차 브랜치의 기준은 공식 `main`입니다. 공식 remote가 없거나 포크가 뒤처져 있으면 제출 탭에 **공식 저장소 연결**이 나타납니다.
 
 ### 1단계: 커밋에 추가
 
@@ -262,7 +262,7 @@ PR이 병합되고 주차 브랜치에 변경이나 미푸시 커밋이 없으�
 
 ## 8. 포크 동기화
 
-공식 저장소의 변경을 포크에 반영하려면 **제출** 탭의 **포크 동기화**를 사용합니다.
+공식 저장소의 변경을 포크에 반영하려면 **제출** 탭의 **포크 동기화**를 사용합니다. 아직 제출 흐름이 없을 때는 **공식 저장소 연결**이 같은 동작을 합니다.
 
 ![작업 트리가 안전한 상태에서 포크 동기화 버튼이 활성화된 화면](media/usage/fork-sync.png)
 
@@ -298,11 +298,11 @@ PR이 병합되고 주차 브랜치에 변경이나 미푸시 커밋이 없으�
 | 제출 탭에 GitHub API 한도 / 로그인 안내 | 제출 탭의 **GitHub으로 로그인**을 눌러 VS Code GitHub 계정으로 인증합니다. 에디터에 이미 GitHub 로그인이 되어 있으면 자동으로 사용합니다. |
 | `풀이 외 파일이 스테이징되어 있습니다` | Source Control에서 풀이가 아닌 파일을 스테이징 해제한 뒤 새로고침합니다. |
 | `공식 저장소에 반영되지 않은 풀이가 여러 주차에 걸쳐 있습니다` | 기존 주차의 PR과 병합을 먼저 완료합니다. 확장은 여러 주차를 자동으로 합치지 않습니다. |
-| `main이 origin/main과 다릅니다` / `main이 공식 저장소보다 뒤처져 있습니다` | 스테이징을 해제하고 `main`에서 **포크 동기화**를 실행한 뒤 다시 커밋에 추가합니다. |
+| `main이 origin/main과 다릅니다` / `main이 공식 저장소보다 뒤처져 있습니다` | 스테이징을 해제하고 `main`에서 제출 탭 오른쪽 위 **포크 동기화**를 실행한 뒤 다시 커밋에 추가합니다. |
+| 포크 동기화 버튼이 비활성화됨 | `main`이 아닌 브랜치, 스테이징·추적 파일 수정, origin보다 앞선 로컬 커밋, merge·rebase 상태를 확인합니다. 버튼 툴팁에 이유가 표시됩니다. untracked 풀이만 있는 경우에는 막히지 않습니다. |
 | 기존 `week-XX` 브랜치를 자동 재사용할 수 없음 | 로컬·원격 tip이 일치하고 공식 `main`에서 이어지며 해당 주차 풀이만 포함해야 합니다. 오염된 브랜치는 자동 rebase하지 않으므로, 공식 `main` tip에서 새로 만든 뒤 해당 주차만 다시 커밋합니다. |
 | `공식 main이 아닌 merge 히스토리가 포함` | GitHub Sync merge 등으로 더러워진 주차 브랜치입니다. 확장은 rebase하거나 fork `main`을 force-reset하지 않습니다. 공식 `main` tip에서 새 브랜치를 만들어 해당 주차만 다시 커밋합니다. |
 | **main으로 돌아가 동기화**가 비활성화됨 | PR 병합 여부와 주차 브랜치의 스테이징·작업 트리·미푸시 커밋을 확인합니다. |
-| 포크 동기화 버튼이 비활성화됨 | 스테이징·추적 파일 수정, 미푸시 커밋, merge·rebase 상태를 먼저 정리합니다. untracked 풀이만 있는 경우에는 막히지 않습니다. |
 | Python 테스트를 사용할 수 없음 | 지원 문제인지, 파일이 Python인지, 실행 파일 경로가 유효한지, 필요한 문제별 객체가 정의됐는지 확인합니다. |
 | 문제 본문을 불러오지 못함 | 네트워크와 LeetCode API 상태를 확인하고 다시 시도하거나 **LeetCode에서 열기**를 사용합니다. |
 
