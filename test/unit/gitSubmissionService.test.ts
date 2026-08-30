@@ -99,6 +99,19 @@ function change(relativePath: string) {
   };
 }
 
+function gitRefFullName(ref: { name: string; remote?: string }): string {
+  return ref.remote ? `refs/remotes/${ref.name}` : `refs/heads/${ref.name}`;
+}
+
+function matchesGitRefPattern(
+  ref: { name: string; remote?: string },
+  pattern: string,
+): boolean {
+  const gitPattern = pattern.startsWith('refs/') ? pattern : `refs/${pattern}`;
+  const fullName = gitRefFullName(ref);
+  return fullName === gitPattern || fullName.startsWith(`${gitPattern}/`);
+}
+
 function createRepository() {
   const state = {
     HEAD: {
@@ -177,7 +190,9 @@ function createRepository() {
       const patterns = Array.isArray(pattern) ? pattern : pattern ? [pattern] : [];
       return patterns.length === 0
         ? state.refs
-        : state.refs.filter(({ name }) => patterns.includes(name));
+        : state.refs.filter((ref) =>
+          patterns.some((item) => matchesGitRefPattern(ref, item))
+        );
     }),
     checkout: vi.fn(async (name: string) => {
       const ref = state.refs.find((item) => item.name === name);
@@ -1571,6 +1586,7 @@ describe('GitStatusService submission actions', () => {
       { name: 'week-01', commit: 'week-tip', remote: undefined },
       { name: 'origin/week-01', commit: 'week-tip', remote: 'origin' },
     );
+    repository.state.refs.find(({ name }) => name === 'upstream/main')!.commit = 'upstream';
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const requestUrl = String(input);
       if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
@@ -1607,9 +1623,66 @@ describe('GitStatusService submission actions', () => {
 
     await service.returnToMainAndSync(uri('file:///study') as never);
 
+    expect(repository.fetch).toHaveBeenCalledWith({ remote: 'origin', prune: true });
+    expect(repository.fetch).toHaveBeenCalledWith({
+      remote: 'origin',
+      ref: 'main',
+      prune: true,
+    });
+    expect(repository.fetch).toHaveBeenCalledWith({
+      remote: 'upstream',
+      ref: 'main',
+      prune: true,
+    });
+    expect(repository.merge).toHaveBeenCalledWith('upstream/main');
     expect(repository.checkout).toHaveBeenCalledWith('main');
     expect(repository.push).toHaveBeenCalledWith('origin', 'main', false);
     expect(repository.state.refs.some(({ name }) => name === 'week-01')).toBe(true);
+    service.dispose();
+  });
+
+  it('does not return to main when the remote week branch is missing', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.commit = 'week-tip';
+    repository.state.HEAD.upstream = {
+      remote: 'origin',
+      name: 'week-01',
+      commit: 'week-tip',
+    };
+    repository.state.refs.push(
+      { name: 'week-01', commit: 'week-tip', remote: undefined },
+    );
+    const service = new GitStatusService();
+
+    await expect(service.returnToMainAndSync(uri('file:///study') as never))
+      .rejects.toThrow('origin/week-01을 찾을 수 없습니다.');
+
+    expect(repository.checkout).not.toHaveBeenCalled();
+    expect(repository.merge).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('does not return to main when local and remote week tips differ', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.commit = 'local-tip';
+    repository.state.HEAD.upstream = {
+      remote: 'origin',
+      name: 'week-01',
+      commit: 'remote-tip',
+    };
+    repository.state.refs.push(
+      { name: 'week-01', commit: 'local-tip', remote: undefined },
+      { name: 'origin/week-01', commit: 'remote-tip', remote: 'origin' },
+    );
+    const service = new GitStatusService();
+
+    await expect(service.returnToMainAndSync(uri('file:///study') as never))
+      .rejects.toThrow('로컬·원격 상태가 일치하지 않습니다.');
+
+    expect(repository.checkout).not.toHaveBeenCalled();
+    expect(repository.merge).not.toHaveBeenCalled();
     service.dispose();
   });
 

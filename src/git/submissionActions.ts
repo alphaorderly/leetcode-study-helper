@@ -17,6 +17,7 @@ import {
   type GitCommit,
   type GitRepository,
   type GitRepositoryAdapter,
+  gitRefLookupPattern,
   relativeChangePaths,
   relativeGitPath,
 } from './vscodeGit';
@@ -402,7 +403,10 @@ export class SubmissionActions {
     await repository.fetch({ remote: 'origin', prune: true });
     await repository.status();
     const remoteBranch = await this.getBranch(repository, `origin/${branch}`);
-    if (!remoteBranch || await getRefRelation(repository, `origin/${branch}`) !== 'equal') {
+    if (!remoteBranch) {
+      throw new Error(`origin/${branch}을 찾을 수 없습니다.`);
+    }
+    if (await getRefRelation(repository, `origin/${branch}`) !== 'equal') {
       throw new Error(`${branch}의 로컬·원격 상태가 일치하지 않습니다.`);
     }
     const origin = this.requireOrigin(repository);
@@ -585,7 +589,7 @@ export class SubmissionActions {
 
   private async getBranch(repository: GitRepository, name: string) {
     try {
-      return (await repository.getRefs({ pattern: name }))
+      return (await repository.getRefs({ pattern: gitRefLookupPattern(name) }))
         .find((ref) => ref.name === name);
     } catch {
       return undefined;

@@ -103,6 +103,12 @@ export function upstreamRef(upstream: GitUpstreamRef): string {
     : `${upstream.remote}/${upstream.name}`;
 }
 
+export function gitRefLookupPattern(name: string): string {
+  return name.includes('/')
+    ? `refs/remotes/${name}`
+    : `refs/heads/${name}`;
+}
+
 export function addChangeUris(
   target: Set<string>,
   changes: readonly GitChange[],
