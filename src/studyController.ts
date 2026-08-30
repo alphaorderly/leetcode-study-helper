@@ -409,8 +409,21 @@ export class StudyController implements vscode.Disposable {
     if (!repository.submission?.canSync) {
       throw new Error('현재 Git 변경을 정리한 뒤 포크를 동기화해 주세요.');
     }
-    await this.gitStatusService.syncFork(vscode.Uri.parse(rootUri));
+    await this.gitStatusService.syncFork(
+      vscode.Uri.parse(rootUri),
+      this.submissionSolutions(repository),
+    );
     await this.refresh();
+    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
+  }
+
+  async discardOtherTrackedChanges(rootUri: string): Promise<void> {
+    this.requireTrustedWorkspace('변경을 되돌리려면 먼저 워크스페이스를 신뢰해야 합니다.');
+    const repository = this.requireSubmissionRepository(rootUri, true);
+    await this.gitStatusService.discardOtherTrackedChanges(
+      vscode.Uri.parse(rootUri),
+      this.submissionSolutions(repository),
+    );
     await this.repositoryRefreshSession.refreshGitStatuses(true, true);
   }
 
@@ -420,7 +433,10 @@ export class StudyController implements vscode.Disposable {
     if (!repository.submission?.canReturnToMain) {
       throw new Error('병합 완료와 깨끗한 Git 상태를 확인한 뒤 main으로 돌아가 주세요.');
     }
-    await this.gitStatusService.returnToMainAndSync(vscode.Uri.parse(rootUri));
+    await this.gitStatusService.returnToMainAndSync(
+      vscode.Uri.parse(rootUri),
+      this.submissionSolutions(repository),
+    );
     await this.repositoryRefreshSession.refreshGitStatuses(true, true);
   }
 

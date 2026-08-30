@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type {
+  BlockingTrackedFile,
   RepositorySubmissionSnapshot,
   SolutionGitStatus,
   SolutionSubmissionStatus,
@@ -31,11 +32,13 @@ import {
   type SubmissionSolution,
 } from './git/submissionActions';
 import {
+  collectBlockingTrackedFiles,
   firstLine,
   localSubmissionStatuses,
   projectSubmissionStatuses,
   singleWeek,
   summaryForStatuses,
+  trackedFilesBlockSync,
   weekBranchName,
   weekFromBranch,
 } from './git/submissionModel';
@@ -163,6 +166,7 @@ export class GitStatusService implements vscode.Disposable {
           canReturnToMain: false,
           hasCanonicalRemote: false,
           behindOfficialMain: false,
+          blockingTrackedFiles: [],
         },
       };
     }
@@ -197,12 +201,25 @@ export class GitStatusService implements vscode.Disposable {
     return this.submissionActions.push(repositoryRoot, solutions);
   }
 
-  async syncFork(repositoryRoot: vscode.Uri): Promise<void> {
-    return this.submissionActions.syncFork(repositoryRoot);
+  async syncFork(
+    repositoryRoot: vscode.Uri,
+    solutions: readonly SubmissionSolution[] = [],
+  ): Promise<void> {
+    return this.submissionActions.syncFork(repositoryRoot, solutions);
   }
 
-  async returnToMainAndSync(repositoryRoot: vscode.Uri): Promise<void> {
-    return this.submissionActions.returnToMainAndSync(repositoryRoot);
+  async discardOtherTrackedChanges(
+    repositoryRoot: vscode.Uri,
+    solutions: readonly SubmissionSolution[],
+  ): Promise<void> {
+    return this.submissionActions.discardOtherTrackedChanges(repositoryRoot, solutions);
+  }
+
+  async returnToMainAndSync(
+    repositoryRoot: vscode.Uri,
+    solutions: readonly SubmissionSolution[] = [],
+  ): Promise<void> {
+    return this.submissionActions.returnToMainAndSync(repositoryRoot, solutions);
   }
 
   async openPullRequest(
@@ -260,8 +277,10 @@ export class GitStatusService implements vscode.Disposable {
 
     const indexPaths = new Set<string>();
     const workingPaths = new Set<string>();
+    const trackedWorkingPaths = new Set<string>();
     const conflictPaths = new Set<string>();
     addRelativeChangePaths(indexPaths, repository.rootUri, repository.state.indexChanges);
+    addRelativeChangePaths(trackedWorkingPaths, repository.rootUri, repository.state.workingTreeChanges);
     addRelativeChangePaths(workingPaths, repository.rootUri, [
       ...repository.state.workingTreeChanges,
       ...repository.state.untrackedChanges,
@@ -271,6 +290,12 @@ export class GitStatusService implements vscode.Disposable {
     const stagedFiles = files.filter(({ relativePath }) => indexPaths.has(relativePath));
     const otherStagedFiles = [...indexPaths].filter(
       (relativePath) => !fileByPath.has(relativePath),
+    );
+    const blockingTrackedFiles = collectBlockingTrackedFiles(
+      indexPaths,
+      trackedWorkingPaths,
+      conflictPaths,
+      new Set(fileByPath.keys()),
     );
     if (fork.status !== 'verified' || !parsedOrigin) {
       const statuses = localSubmissionStatuses({
@@ -293,6 +318,7 @@ export class GitStatusService implements vscode.Disposable {
         canReturnToMain: false,
         hasCanonicalRemote: false,
         behindOfficialMain: false,
+        blockingTrackedFiles,
       };
       return { statuses, pullRequestNumbers: new Map(), snapshot };
     }
@@ -335,6 +361,7 @@ export class GitStatusService implements vscode.Disposable {
         canReturnToMain: false,
         hasCanonicalRemote: false,
         behindOfficialMain: false,
+        blockingTrackedFiles,
       };
       return { statuses, pullRequestNumbers: new Map(), snapshot };
     }
@@ -406,14 +433,14 @@ export class GitStatusService implements vscode.Disposable {
       || repository.state.workingTreeChanges.length > 0
       || repository.state.mergeChanges.length > 0;
     const hasUntrackedChanges = repository.state.untrackedChanges.length > 0;
-    // untracked 풀이는 다음 주 준비 중에도 Sync를 막지 않는다.
+    const blocksForkSync = trackedFilesBlockSync(blockingTrackedFiles);
     const canSync = branch === 'main'
-      && !hasDirtyTrackedState
+      && !blocksForkSync
       && !repository.state.rebaseCommit
       && !hasBlockingOriginCommits;
     const syncDisabledReason = describeSyncDisabledReason(
       branch,
-      hasDirtyTrackedState,
+      blockingTrackedFiles,
       Boolean(repository.state.rebaseCommit),
       hasBlockingOriginCommits,
     );
@@ -482,6 +509,7 @@ export class GitStatusService implements vscode.Disposable {
       hasCanonicalRemote,
       behindOfficialMain: remote.behindBy > 0,
       syncDisabledReason,
+      blockingTrackedFiles,
     };
     return { statuses, pullRequestNumbers, snapshot };
   }
@@ -580,18 +608,21 @@ export class GitStatusService implements vscode.Disposable {
 
 function describeSyncDisabledReason(
   branch: string | undefined,
-  hasDirtyTrackedState: boolean,
+  blockingTrackedFiles: readonly BlockingTrackedFile[],
   rebaseInProgress: boolean,
   hasBlockingOriginCommits: boolean,
 ): string | undefined {
   if (branch !== 'main') {
     return '포크 동기화는 main 브랜치에서만 실행할 수 있습니다.';
   }
-  if (rebaseInProgress) {
+  if (rebaseInProgress || blockingTrackedFiles.some(({ state }) => state === 'conflict')) {
     return '진행 중인 merge 또는 rebase를 먼저 정리해 주세요.';
   }
-  if (hasDirtyTrackedState) {
-    return '스테이징 또는 추적 파일 변경을 먼저 정리해 주세요.';
+  if (blockingTrackedFiles.some(({ state }) => state === 'staged')) {
+    return '스테이징된 파일을 먼저 정리해 주세요.';
+  }
+  if (blockingTrackedFiles.some(({ kind }) => kind === 'other')) {
+    return '풀이 외 추적 파일 변경을 되돌린 뒤 포크를 동기화해 주세요.';
   }
   if (hasBlockingOriginCommits) {
     return 'origin에 push하지 않은 로컬 커밋을 먼저 처리해 주세요.';

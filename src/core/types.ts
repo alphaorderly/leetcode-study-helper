@@ -97,6 +97,12 @@ export interface SubmissionSummary {
   unknown: number;
 }
 
+export interface BlockingTrackedFile {
+  relativePath: string;
+  kind: 'solution' | 'other';
+  state: 'staged' | 'modified' | 'conflict';
+}
+
 export interface RepositorySubmissionSnapshot {
   status: 'checking' | 'ready' | 'unsupported' | 'blocked' | 'unavailable';
   branch?: string;
@@ -117,6 +123,7 @@ export interface RepositorySubmissionSnapshot {
   hasCanonicalRemote: boolean;
   behindOfficialMain: boolean;
   syncDisabledReason?: string;
+  blockingTrackedFiles: BlockingTrackedFile[];
 }
 
 export interface ProblemTopicTag {
@@ -237,6 +244,7 @@ export type WebviewToExtensionMessage =
   | { type: 'pushActiveWeek'; rootUri: string }
   | { type: 'openPullRequest'; rootUri: string }
   | { type: 'syncFork'; rootUri: string }
+  | { type: 'discardOtherTrackedChanges'; rootUri: string }
   | { type: 'returnToMainAndSync'; rootUri: string }
   | { type: 'refreshSubmission' }
   | { type: 'signInGitHub' };

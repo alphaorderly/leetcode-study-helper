@@ -12,7 +12,12 @@ import {
 } from './githubSubmissionClient';
 import { buildPullRequestBody, buildPullRequestCompareUrl } from './pullRequestBody';
 import { getRefRelation } from './refRelation';
-import { weekBranchName, weekFromBranch } from './submissionModel';
+import {
+  collectBlockingTrackedFiles,
+  trackedFilesBlockSync,
+  weekBranchName,
+  weekFromBranch,
+} from './submissionModel';
 import {
   type GitCommit,
   type GitRepository,
@@ -53,7 +58,7 @@ export class SubmissionActions {
       throw new Error(`Week ${week} 풀이는 main 또는 ${branch} 브랜치에서만 추가할 수 있습니다.`);
     }
     if (repository.state.indexChanges.length === 0 && currentBranch === 'main') {
-      await this.requireSynchronizedMain(repository);
+      await this.requireSynchronizedMain(repository, solutions);
     }
     const origin = this.requireOrigin(repository);
     const remote = await this.githubClient.getRemoteSubmission(origin, undefined, true);
@@ -144,7 +149,7 @@ export class SubmissionActions {
     }
     const fileByPath = this.fileByPath(repository, solutions);
     if (currentBranch === 'main') {
-      const canonicalMain = await this.requireSynchronizedMain(repository);
+      const canonicalMain = await this.requireSynchronizedMain(repository, solutions);
       await this.checkoutSubmissionBranch(
         repository,
         submissionBranch,
@@ -296,15 +301,39 @@ export class SubmissionActions {
     this.githubClient.clearSubmissionCache();
   }
 
-  async syncFork(repositoryRoot: vscode.Uri): Promise<void> {
+  async syncFork(
+    repositoryRoot: vscode.Uri,
+    solutions: readonly SubmissionSolution[],
+  ): Promise<void> {
     const repository = await this.requireSubmissionMutation(repositoryRoot, true);
     if (repository.state.HEAD?.name !== 'main') {
       throw new Error('포크 동기화는 main 브랜치에서만 실행할 수 있습니다.');
     }
-    if (this.hasDirtyTrackedState(repository)) {
-      throw new Error('스테이징 또는 추적 파일 변경을 먼저 정리해 주세요.');
+    if (this.hasBlockingDirtyState(repository, solutions)) {
+      throw new Error('스테이징 또는 풀이 외 추적 파일 변경을 먼저 정리해 주세요.');
     }
     await this.performForkSync(repository);
+  }
+
+  async discardOtherTrackedChanges(
+    repositoryRoot: vscode.Uri,
+    solutions: readonly SubmissionSolution[],
+  ): Promise<void> {
+    const repository = await this.repositoryAdapter.requireRepository(repositoryRoot);
+    await repository.status();
+    if (repository.state.rebaseCommit || repository.state.mergeChanges.length > 0) {
+      throw new Error('진행 중인 merge 또는 rebase를 먼저 정리해 주세요.');
+    }
+    const otherPaths = this.otherTrackedChangePaths(repository, solutions);
+    if (otherPaths.length === 0) {
+      throw new Error('되돌릴 풀이 외 추적 파일 변경이 없습니다.');
+    }
+    await repository.revert(otherPaths);
+    await repository.status();
+    const remaining = this.otherTrackedChangePaths(repository, solutions);
+    if (remaining.length > 0) {
+      throw new Error('풀이 외 추적 파일 변경을 모두 되돌리지 못했습니다.');
+    }
   }
 
   async openPullRequest(
@@ -345,7 +374,10 @@ export class SubmissionActions {
     }
   }
 
-  async returnToMainAndSync(repositoryRoot: vscode.Uri): Promise<void> {
+  async returnToMainAndSync(
+    repositoryRoot: vscode.Uri,
+    solutions: readonly SubmissionSolution[],
+  ): Promise<void> {
     const repository = await this.requireSubmissionMutation(repositoryRoot, true);
     const branch = repository.state.HEAD?.name;
     if (!branch || !weekFromBranch(branch)) {
@@ -376,7 +408,7 @@ export class SubmissionActions {
     }
     await repository.checkout('main');
     await repository.status();
-    await this.syncFork(repositoryRoot);
+    await this.syncFork(repositoryRoot, solutions);
   }
 
   private async requireSubmissionMutation(
@@ -415,11 +447,41 @@ export class SubmissionActions {
     return origin;
   }
 
-  private hasDirtyTrackedState(repository: GitRepository): boolean {
-    return repository.state.indexChanges.length > 0
-      || repository.state.workingTreeChanges.length > 0
-      || repository.state.mergeChanges.length > 0
-      || Boolean(repository.state.rebaseCommit);
+  private hasBlockingDirtyState(
+    repository: GitRepository,
+    solutions: readonly SubmissionSolution[],
+  ): boolean {
+    return trackedFilesBlockSync(this.blockingTrackedFiles(repository, solutions));
+  }
+
+  private blockingTrackedFiles(
+    repository: GitRepository,
+    solutions: readonly SubmissionSolution[],
+  ) {
+    const solutionPaths = new Set(this.fileByPath(repository, solutions).keys());
+    return collectBlockingTrackedFiles(
+      relativeChangePaths(repository.rootUri, repository.state.indexChanges),
+      relativeChangePaths(repository.rootUri, repository.state.workingTreeChanges),
+      relativeChangePaths(repository.rootUri, repository.state.mergeChanges),
+      solutionPaths,
+    );
+  }
+
+  private otherTrackedChangePaths(
+    repository: GitRepository,
+    solutions: readonly SubmissionSolution[],
+  ): string[] {
+    const solutionPaths = new Set(this.fileByPath(repository, solutions).keys());
+    const paths = new Set<string>();
+    for (const change of [
+      ...repository.state.indexChanges,
+      ...repository.state.workingTreeChanges,
+    ]) {
+      if (!solutionPaths.has(relativeGitPath(repository.rootUri, change.uri))) {
+        paths.add(change.uri.fsPath);
+      }
+    }
+    return [...paths];
   }
 
   private async originMainRelation(repository: GitRepository) {
@@ -469,7 +531,10 @@ export class SubmissionActions {
     return canonicalMain;
   }
 
-  private async requireSynchronizedMain(repository: GitRepository): Promise<string> {
+  private async requireSynchronizedMain(
+    repository: GitRepository,
+    solutions: readonly SubmissionSolution[],
+  ): Promise<string> {
     if (repository.state.HEAD?.name !== 'main') {
       throw new Error('새 주차 브랜치는 main에서만 만들 수 있습니다.');
     }
@@ -495,8 +560,8 @@ export class SubmissionActions {
       // equal: 동일 SHA. ahead: 공식 main을 이미 포함한 포크(merge 커밋 등).
       return canonicalMain;
     }
-    if (this.hasDirtyTrackedState(repository)) {
-      throw new Error('스테이징 또는 추적 파일 변경을 정리한 뒤 포크를 동기화해 주세요.');
+    if (this.hasBlockingDirtyState(repository, solutions)) {
+      throw new Error('스테이징 또는 풀이 외 추적 파일 변경을 정리한 뒤 포크를 동기화해 주세요.');
     }
     return this.performForkSync(repository);
   }

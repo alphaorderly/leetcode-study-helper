@@ -1,4 +1,5 @@
 import type {
+  BlockingTrackedFile,
   SolutionSubmissionStatus,
   SubmissionFileSnapshot,
   SubmissionSummary,
@@ -156,6 +157,38 @@ export function weekFromBranch(branch: string | undefined): number | undefined {
 
 export function firstLine(value: string): string {
   return value.split(/\r?\n/, 1)[0]?.trim() || '커밋';
+}
+
+export function collectBlockingTrackedFiles(
+  indexPaths: ReadonlySet<string>,
+  trackedWorkingPaths: ReadonlySet<string>,
+  conflictPaths: ReadonlySet<string>,
+  solutionPaths: ReadonlySet<string>,
+): BlockingTrackedFile[] {
+  const paths = new Set([
+    ...indexPaths,
+    ...trackedWorkingPaths,
+    ...conflictPaths,
+  ]);
+  return [...paths].sort().map((relativePath) => ({
+    relativePath,
+    kind: solutionPaths.has(relativePath) ? 'solution' : 'other',
+    state: conflictPaths.has(relativePath)
+      ? 'conflict'
+      : indexPaths.has(relativePath)
+        ? 'staged'
+        : 'modified',
+  }));
+}
+
+export function trackedFilesBlockSync(
+  files: readonly BlockingTrackedFile[],
+): boolean {
+  return files.some((file) =>
+    file.state === 'conflict'
+    || file.state === 'staged'
+    || file.kind === 'other'
+  );
 }
 
 function localStatus(

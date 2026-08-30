@@ -173,7 +173,7 @@ function createRepository() {
       async (): Promise<Array<{ hash: string; message: string; parents: string[] }>> => [],
     ),
     add: vi.fn(async () => {}),
-    revert: vi.fn(async () => {}),
+    revert: vi.fn(async (_paths: string[]) => {}),
     commit: vi.fn(async () => {}),
     createBranch: vi.fn(async (name: string, checkout: boolean, ref = 'HEAD') => {
       const commit = ref === 'HEAD'
@@ -448,9 +448,9 @@ describe('GitStatusService submission actions', () => {
     service.dispose();
   });
 
-  it('does not auto-sync a dirty main when official main is ahead', async () => {
+  it('does not auto-sync a dirty main when non-solution files are modified', async () => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
-    repository.state.workingTreeChanges = [change('two-sum/CaseUser.py')];
+    repository.state.workingTreeChanges = [change('README.md')];
     repository.state.refs.find(({ name }) => name === 'upstream/main')!.commit = 'newer';
     repository.getMergeBase.mockImplementation(async (_ref1: string, ref2: string) => {
       if (ref2 === 'upstream/main' || ref2 === 'origin/main') {
@@ -470,7 +470,7 @@ describe('GitStatusService submission actions', () => {
         slug: 'two-sum',
         week: 1,
       }],
-    )).rejects.toThrow('추적 파일 변경을 정리한 뒤 포크를 동기화');
+    )).rejects.toThrow('풀이 외 추적 파일 변경을 정리한 뒤 포크를 동기화');
 
     expect(repository.add).not.toHaveBeenCalled();
     expect(repository.merge).not.toHaveBeenCalled();
@@ -1207,6 +1207,7 @@ describe('GitStatusService submission actions', () => {
       canReturnToMain: false,
       hasCanonicalRemote: true,
       behindOfficialMain: false,
+      blockingTrackedFiles: [],
     };
 
     await service.openPullRequest(submission, 'CaseUser');
@@ -1258,6 +1259,28 @@ describe('GitStatusService submission actions', () => {
       2,
       { remote: 'upstream', ref: 'main', prune: true },
     );
+    expect(repository.merge).toHaveBeenCalledWith('upstream/main');
+    expect(repository.push).toHaveBeenCalledWith('origin', 'main', false);
+    service.dispose();
+  });
+
+  it('allows fork sync when only solution working-tree files are modified', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.workingTreeChanges = [change('two-sum/CaseUser.py')];
+    repository.state.refs.find(({ name }) => name === 'upstream/main')!.commit = 'upstream';
+    vi.stubGlobal('fetch', vi.fn(async () => githubResponse({
+      fork: true,
+      source: { full_name: 'DaleStudy/leetcode-study' },
+    })));
+    const service = new GitStatusService();
+
+    await service.syncFork(uri('file:///study') as never, [{
+      name: 'CaseUser.py',
+      uri: 'file:///study/two-sum/CaseUser.py',
+      slug: 'two-sum',
+      week: 1,
+    }]);
+
     expect(repository.merge).toHaveBeenCalledWith('upstream/main');
     expect(repository.push).toHaveBeenCalledWith('origin', 'main', false);
     service.dispose();
@@ -1565,6 +1588,131 @@ describe('GitStatusService submission actions', () => {
     expect(result.submission?.hasCanonicalRemote).toBe(true);
     expect(result.submission?.behindOfficialMain).toBe(false);
     expect(result.submission?.syncDisabledReason).toBeUndefined();
+    service.dispose();
+  });
+
+  it('keeps canSync enabled when only solution working-tree files are modified', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.workingTreeChanges = [change('two-sum/CaseUser.py')];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({
+          ahead_by: 0,
+          behind_by: 0,
+          files: [],
+          commits: [],
+        });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({
+          truncated: false,
+          tree: [],
+        });
+      }
+      return githubResponse([]);
+    }));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(result.submission?.canSync).toBe(true);
+    expect(result.submission?.blockingTrackedFiles).toEqual([{
+      relativePath: 'two-sum/CaseUser.py',
+      kind: 'solution',
+      state: 'modified',
+    }]);
+    expect(result.submission?.syncDisabledReason).toBeUndefined();
+    service.dispose();
+  });
+
+  it('disables canSync when non-solution tracked files are modified', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.workingTreeChanges = [change('README.md')];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({
+          ahead_by: 0,
+          behind_by: 0,
+          files: [],
+          commits: [],
+        });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({
+          truncated: false,
+          tree: [],
+        });
+      }
+      return githubResponse([]);
+    }));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(result.submission?.canSync).toBe(false);
+    expect(result.submission?.blockingTrackedFiles).toEqual([{
+      relativePath: 'README.md',
+      kind: 'other',
+      state: 'modified',
+    }]);
+    expect(result.submission?.syncDisabledReason)
+      .toBe('풀이 외 추적 파일 변경을 되돌린 뒤 포크를 동기화해 주세요.');
+    service.dispose();
+  });
+
+  it('discards only non-solution tracked changes', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.workingTreeChanges = [
+      change('README.md'),
+      change('two-sum/CaseUser.py'),
+    ];
+    repository.revert.mockImplementation(async (paths: string[]) => {
+      const restored = new Set(paths);
+      repository.state.workingTreeChanges = repository.state.workingTreeChanges.filter(
+        (item) => !restored.has(item.uri.fsPath),
+      );
+    });
+    const service = new GitStatusService();
+
+    await service.discardOtherTrackedChanges(
+      uri('file:///study') as never,
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }],
+    );
+
+    expect(repository.revert).toHaveBeenCalledWith(['/study/README.md']);
     service.dispose();
   });
 

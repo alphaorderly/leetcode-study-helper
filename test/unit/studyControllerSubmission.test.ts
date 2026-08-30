@@ -7,6 +7,7 @@ const gitMocks = vi.hoisted(() => ({
   commit: vi.fn(async () => {}),
   push: vi.fn(async () => {}),
   syncFork: vi.fn(async () => {}),
+  discardOtherTrackedChanges: vi.fn(async () => {}),
   returnToMainAndSync: vi.fn(async () => {}),
   openPullRequest: vi.fn(async () => {}),
   getStatuses: vi.fn(async () => ({
@@ -75,6 +76,7 @@ async function createController(submission: RepositorySubmissionSnapshot) {
       readonly commit = gitMocks.commit;
       readonly push = gitMocks.push;
       readonly syncFork = gitMocks.syncFork;
+      readonly discardOtherTrackedChanges = gitMocks.discardOtherTrackedChanges;
       readonly returnToMainAndSync = gitMocks.returnToMainAndSync;
       readonly openPullRequest = gitMocks.openPullRequest;
       readonly getStatuses = gitMocks.getStatuses;
@@ -181,6 +183,7 @@ function submission(
     canReturnToMain: false,
     hasCanonicalRemote: true,
     behindOfficialMain: false,
+    blockingTrackedFiles: [],
     ...overrides,
   };
 }
@@ -274,8 +277,13 @@ describe('StudyController weekly submission guard', () => {
 
     await controller.returnToMainAndSync('file:///study');
 
-    expect(gitMocks.returnToMainAndSync)
-      .toHaveBeenCalledWith(expect.objectContaining({ fsPath: '/study' }));
+    expect(gitMocks.returnToMainAndSync).toHaveBeenCalledWith(
+      expect.objectContaining({ fsPath: '/study' }),
+      expect.arrayContaining([
+        expect.objectContaining({ slug: 'two-sum' }),
+        expect.objectContaining({ slug: 'three-sum' }),
+      ]),
+    );
     controller.dispose();
   });
 

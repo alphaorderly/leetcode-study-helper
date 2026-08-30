@@ -33,6 +33,7 @@ function isWebviewMessage(value: unknown): value is WebviewToExtensionMessage {
     type === 'pushActiveWeek' ||
     type === 'openPullRequest' ||
     type === 'syncFork' ||
+    type === 'discardOtherTrackedChanges' ||
     type === 'returnToMainAndSync' ||
     type === 'refreshSubmission' ||
     type === 'signInGitHub'
@@ -151,6 +152,9 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
           break;
         case 'syncFork':
           await this.withBusy(() => this.controller.syncFork(message.rootUri));
+          break;
+        case 'discardOtherTrackedChanges':
+          await this.withBusy(() => this.controller.discardOtherTrackedChanges(message.rootUri));
           break;
         case 'returnToMainAndSync':
           await this.withBusy(() => this.controller.returnToMainAndSync(message.rootUri));

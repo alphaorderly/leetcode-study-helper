@@ -155,6 +155,7 @@ function submissionSnapshot(): ExtensionSnapshot {
         canReturnToMain: false,
         hasCanonicalRemote: true,
         behindOfficialMain: false,
+        blockingTrackedFiles: [],
       },
       problems: [{
         ...problem,
@@ -852,9 +853,9 @@ describe('webview rendering', () => {
 
     renderApp(root, empty, ui, post);
 
-    expect(root.textContent).toContain('공식 DaleStudy 저장소와 맞춰야');
+    expect(root.textContent).toContain('공식 main을 포크에 반영하면');
     const button = [...root.querySelectorAll<HTMLButtonElement>('button')]
-      .find(({ textContent }) => textContent === '공식 저장소 연결');
+      .find(({ textContent }) => textContent === '지금 맞추기');
     expect(button).toBeDefined();
     expect(button?.disabled).toBe(false);
     button?.click();
@@ -889,6 +890,7 @@ describe('webview rendering', () => {
   });
 
   it('shows the sync-disabled reason in the connect empty state', () => {
+    const post = vi.fn();
     ui.viewMode = 'submission';
     const state = submissionSnapshot();
     const behind: ExtensionSnapshot = {
@@ -899,7 +901,12 @@ describe('webview rendering', () => {
           ...repository.submission!,
           behindOfficialMain: true,
           canSync: false,
-          syncDisabledReason: '스테이징 또는 추적 파일 변경을 먼저 정리해 주세요.',
+          syncDisabledReason: '풀이 외 추적 파일 변경을 되돌린 뒤 포크를 동기화해 주세요.',
+          blockingTrackedFiles: [{
+            relativePath: 'README.md',
+            kind: 'other',
+            state: 'modified',
+          }],
           stagedFiles: [],
           pendingCommits: [],
           forkFiles: [],
@@ -911,14 +918,23 @@ describe('webview rendering', () => {
       })),
     };
 
-    renderApp(root, behind, ui, vi.fn());
+    renderApp(root, behind, ui, post);
 
-    expect(root.textContent).toContain('공식 DaleStudy 저장소와 맞춰야');
-    expect(root.textContent).toContain('스테이징 또는 추적 파일 변경을 먼저 정리해 주세요.');
+    expect(root.textContent).toContain('공식 main을 포크에 반영하면');
+    expect(root.textContent).toContain('풀이 외 추적 파일 변경을 되돌린 뒤 포크를 동기화해 주세요.');
+    expect(root.textContent).toContain('README.md');
     const connectButton = [...root.querySelectorAll<HTMLButtonElement>('button')]
-      .find(({ textContent }) => textContent === '공식 저장소 연결');
+      .find(({ textContent }) => textContent === '지금 맞추기');
     expect(connectButton?.disabled).toBe(true);
-    expect(connectButton?.title).toBe('스테이징 또는 추적 파일 변경을 먼저 정리해 주세요.');
+    expect(connectButton?.title).toBe('풀이 외 추적 파일 변경을 되돌린 뒤 포크를 동기화해 주세요.');
+    const restore = [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .find(({ textContent }) => textContent === '풀이 외 변경 되돌리기');
+    expect(restore).toBeDefined();
+    restore?.click();
+    expect(post).toHaveBeenCalledWith({
+      type: 'discardOtherTrackedChanges',
+      rootUri: 'file:///study-a',
+    });
   });
 
   it('removes merged files from the submission graph while keeping the card badge', () => {

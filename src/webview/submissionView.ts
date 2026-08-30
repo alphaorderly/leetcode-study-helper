@@ -1,6 +1,8 @@
 import type {
+  BlockingTrackedFile,
   ExtensionSnapshot,
   RepositorySnapshot,
+  RepositorySubmissionSnapshot,
 } from '../core/types';
 import { element, renderLoadingState } from './dom';
 import type { PostMessage, UiState } from './viewTypes';
@@ -15,6 +17,81 @@ function renderSubmissionFiles(
     list.append(item);
   }
   return list;
+}
+
+function blockingFilesForDisplay(
+  files: readonly BlockingTrackedFile[],
+): BlockingTrackedFile[] {
+  return files.filter((file) =>
+    file.state === 'conflict'
+    || file.state === 'staged'
+    || file.kind === 'other'
+  );
+}
+
+function renderBlockingTrackedFiles(
+  submission: RepositorySubmissionSnapshot,
+  repository: RepositorySnapshot,
+  ui: UiState,
+  post: PostMessage,
+): HTMLElement | undefined {
+  const files = blockingFilesForDisplay(submission.blockingTrackedFiles ?? []);
+  if (files.length === 0) {
+    return undefined;
+  }
+  const region = element('div', 'submission-blocking-files');
+  const otherFiles = files.filter((file) => file.kind === 'other' && file.state !== 'conflict');
+  const stagedSolutions = files.filter((file) =>
+    file.kind === 'solution' && file.state === 'staged'
+  );
+  const conflicts = files.filter((file) => file.state === 'conflict');
+  if (otherFiles.length > 0) {
+    const warning = element('details', 'submission-other-files');
+    warning.open = true;
+    warning.append(
+      element(
+        'summary',
+        undefined,
+        `풀이 외 추적 파일 ${otherFiles.length}개`,
+      ),
+      renderSubmissionFiles(
+        otherFiles.map((file) => ({
+          name: file.relativePath.split('/').pop() ?? file.relativePath,
+          relativePath: file.relativePath,
+        })),
+      ),
+    );
+    const restore = element('button', 'secondary-button', '풀이 외 변경 되돌리기');
+    restore.type = 'button';
+    restore.disabled = ui.busy;
+    restore.addEventListener('click', () =>
+      post({ type: 'discardOtherTrackedChanges', rootUri: repository.rootUri })
+    );
+    warning.append(restore);
+    region.append(warning);
+  }
+  if (stagedSolutions.length > 0) {
+    region.append(element(
+      'p',
+      'issue',
+      '스테이징된 풀이는 문제 카드에서 커밋에 추가를 해제한 뒤 동기화할 수 있습니다.',
+    ));
+  }
+  if (conflicts.length > 0) {
+    const warning = element('details', 'submission-other-files');
+    warning.open = true;
+    warning.append(
+      element('summary', undefined, `충돌 파일 ${conflicts.length}개`),
+      renderSubmissionFiles(
+        conflicts.map((file) => ({
+          name: file.relativePath.split('/').pop() ?? file.relativePath,
+          relativePath: file.relativePath,
+        })),
+      ),
+    );
+    region.append(warning);
+  }
+  return region;
 }
 
 function renderSubmissionSummary(repository: RepositorySnapshot): HTMLElement {
@@ -130,17 +207,21 @@ function renderSubmissionGraph(
       region.append(element(
         'p',
         'empty-state',
-        '공식 DaleStudy 저장소와 맞춰야 주차 제출을 시작할 수 있습니다.',
+        '공식 main을 포크에 반영하면 주차를 시작할 수 있습니다.',
       ));
       if (!submission.canSync && submission.syncDisabledReason) {
         region.append(element('p', 'issue', submission.syncDisabledReason));
       }
-      const button = element('button', 'primary-button', '공식 저장소 연결');
+      const blocking = renderBlockingTrackedFiles(submission, repository, ui, post);
+      if (blocking) {
+        region.append(blocking);
+      }
+      const button = element('button', 'primary-button', '지금 맞추기');
       button.type = 'button';
       button.disabled = ui.busy || !submission.canSync;
       if (!submission.canSync) {
         button.title = submission.syncDisabledReason
-          ?? '스테이징·추적 파일 수정과 미푸시 커밋을 먼저 정리해 주세요.';
+          ?? '스테이징·풀이 외 추적 파일 수정과 미푸시 커밋을 먼저 정리해 주세요.';
       }
       button.addEventListener('click', () =>
         post({ type: 'syncFork', rootUri: repository.rootUri })
@@ -163,6 +244,10 @@ function renderSubmissionGraph(
     && submission.syncDisabledReason
   ) {
     graph.append(element('p', 'issue', submission.syncDisabledReason));
+    const blocking = renderBlockingTrackedFiles(submission, repository, ui, post);
+    if (blocking) {
+      graph.append(blocking);
+    }
   }
 
   const pullRequestStatusLabel = pullRequestSnapshot?.status === 'merged'

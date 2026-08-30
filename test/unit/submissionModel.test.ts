@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { SubmissionFileSnapshot } from '../../src/core/types';
 import {
+  collectBlockingTrackedFiles,
   localSubmissionStatuses,
   projectSubmissionStatuses,
   summaryForStatuses,
+  trackedFilesBlockSync,
   weekBranchName,
   weekFromBranch,
 } from '../../src/git/submissionModel';
@@ -114,5 +116,24 @@ describe('submission status projection', () => {
 
     expect(statuses.get(staged.uri)).toBe('staged');
     expect(statuses.get(working.uri)).toBe('working');
+  });
+
+  it('blocks fork sync for staged or non-solution tracked files only', () => {
+    const files = collectBlockingTrackedFiles(
+      new Set(['two-sum/CaseUser.py']),
+      new Set(['README.md', 'three-sum/CaseUser.py']),
+      new Set(),
+      new Set(['two-sum/CaseUser.py', 'three-sum/CaseUser.py']),
+    );
+
+    expect(files).toEqual([
+      { relativePath: 'README.md', kind: 'other', state: 'modified' },
+      { relativePath: 'three-sum/CaseUser.py', kind: 'solution', state: 'modified' },
+      { relativePath: 'two-sum/CaseUser.py', kind: 'solution', state: 'staged' },
+    ]);
+    expect(trackedFilesBlockSync(files)).toBe(true);
+    expect(trackedFilesBlockSync([
+      { relativePath: 'three-sum/CaseUser.py', kind: 'solution', state: 'modified' },
+    ])).toBe(false);
   });
 });
