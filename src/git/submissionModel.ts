@@ -16,6 +16,7 @@ interface LocalStatusInput {
 interface SubmissionStatusInput extends LocalStatusInput {
   readonly pendingPaths: ReadonlySet<string>;
   readonly remote: RemoteSubmissionState;
+  readonly canonicalMatchingPaths?: ReadonlySet<string>;
 }
 
 export interface SubmissionStatusProjection {
@@ -43,6 +44,7 @@ export function projectSubmissionStatuses({
   conflictPaths,
   pendingPaths,
   remote,
+  canonicalMatchingPaths,
 }: SubmissionStatusInput): SubmissionStatusProjection {
   const statuses = new Map<string, SolutionSubmissionStatus>();
   const pullRequestNumbers = new Map<string, number>();
@@ -77,7 +79,7 @@ export function projectSubmissionStatuses({
           && remote.behindBy > 0
           ? 'sync-needed'
           : 'pr-needed';
-    } else if (remote.canonicalFilePaths?.has(file.relativePath)) {
+    } else if (canonicalMatchingPaths?.has(file.relativePath)) {
       status = 'merged';
     } else if (remote.behindBy > 0) {
       status = 'sync-needed';

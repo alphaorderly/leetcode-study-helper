@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import * as vscode from 'vscode';
 import type {
   BlockingTrackedFile,
+  LocalSubmissionHistorySnapshot,
   RepositorySubmissionSnapshot,
   SolutionGitStatus,
   SolutionSubmissionStatus,
@@ -211,8 +213,13 @@ export class GitStatusService implements vscode.Disposable {
   async discardOtherTrackedChanges(
     repositoryRoot: vscode.Uri,
     solutions: readonly SubmissionSolution[],
+    expectedRelativePaths: readonly string[],
   ): Promise<void> {
-    return this.submissionActions.discardOtherTrackedChanges(repositoryRoot, solutions);
+    return this.submissionActions.discardOtherTrackedChanges(
+      repositoryRoot,
+      solutions,
+      expectedRelativePaths,
+    );
   }
 
   async returnToMainAndSync(
@@ -266,15 +273,6 @@ export class GitStatusService implements vscode.Disposable {
       relativePath: relativeGitPath(repository.rootUri, vscode.Uri.parse(solution.uri)),
     }));
     const fileByPath = new Map(files.map((file) => [file.relativePath, file]));
-    const origin = repository.state.remotes.find(({ name }) => name === 'origin');
-    const parsedOrigin = parseConsistentRemote(origin);
-    const fork = parsedOrigin
-      ? await this.githubClient.getForkIdentity(parsedOrigin, forceRemote)
-      : {
-        status: 'unsupported' as const,
-        reason: 'origin의 fetch/push URL이 동일한 GitHub 저장소를 가리키지 않습니다.',
-      };
-
     const indexPaths = new Set<string>();
     const workingPaths = new Set<string>();
     const trackedWorkingPaths = new Set<string>();
@@ -297,38 +295,94 @@ export class GitStatusService implements vscode.Disposable {
       conflictPaths,
       new Set(fileByPath.keys()),
     );
-    if (fork.status !== 'verified' || !parsedOrigin) {
-      const statuses = localSubmissionStatuses({
-        files,
-        indexPaths,
-        workingPaths,
-        conflictPaths,
-      });
-      const snapshot: RepositorySubmissionSnapshot = {
-        status: fork.status === 'unsupported' ? 'unsupported' : 'unavailable',
-        branch: repository.state.HEAD?.name,
-        fork,
-        stagedFiles,
-        otherStagedFiles,
-        pendingCommits: [],
-        forkFiles: [],
-        otherForkFiles: [],
-        summary: summaryForStatuses(statuses),
-        canSync: false,
-        canReturnToMain: false,
-        hasCanonicalRemote: false,
-        behindOfficialMain: false,
-        blockingTrackedFiles,
-      };
-      return { statuses, pullRequestNumbers: new Map(), snapshot };
-    }
-
     const branch = repository.state.HEAD?.name;
     const stagedWeek = singleWeek(stagedFiles);
     const currentBranchWeek = weekFromBranch(branch);
     const requestedSubmissionBranch = currentBranchWeek
       ? branch
       : stagedWeek ? weekBranchName(stagedWeek) : undefined;
+    let canonicalRemoteName: string | undefined;
+    try {
+      canonicalRemoteName = resolveCanonicalRemoteName(repository.state.remotes);
+    } catch {
+      canonicalRemoteName = undefined;
+    }
+    const local = await this.getLocalPendingCommits(
+      repository,
+      fileByPath,
+      currentBranchWeek,
+      canonicalRemoteName,
+    );
+    const pendingPaths = new Set(
+      local.commits.flatMap(({ files: commitFiles }) =>
+        commitFiles.map(({ relativePath }) => relativePath)
+      ),
+    );
+    const localStatuses = new Map(localSubmissionStatuses({
+      files,
+      indexPaths,
+      workingPaths,
+      conflictPaths,
+    }));
+    for (const file of files) {
+      if (pendingPaths.has(file.relativePath) && localStatuses.get(file.uri) === 'unknown') {
+        localStatuses.set(file.uri, 'push-needed');
+      }
+    }
+    const localInspectionFailed = local.commits.some(
+      ({ fileInspectionStatus }) => fileInspectionStatus === 'unavailable',
+    );
+    const localBlockedReason = local.history.status === 'unavailable'
+      ? local.history.reason ?? '로컬 커밋 기록을 확인할 수 없습니다.'
+      : localInspectionFailed
+        ? '일부 로컬 커밋의 변경 파일을 확인할 수 없어 push할 수 없습니다.'
+        : local.history.usedLocalMainFallback
+          ? '공식 remote를 확인할 수 없어 로컬 main 기준으로만 커밋을 표시합니다.'
+          : undefined;
+    const localActiveFiles = [
+      ...stagedFiles,
+      ...local.commits.flatMap(({ files: commitFiles }) => commitFiles),
+    ];
+    const localActiveWeeks = new Set(localActiveFiles.map(({ week }) => week).filter(
+      (week): week is number => week !== undefined,
+    ));
+    const localActiveSubmissionWeek = localActiveWeeks.size === 1
+      ? [...localActiveWeeks][0]
+      : localActiveWeeks.size === 0
+        ? currentBranchWeek
+        : undefined;
+
+    const origin = repository.state.remotes.find(({ name }) => name === 'origin');
+    const parsedOrigin = parseConsistentRemote(origin);
+    const fork = parsedOrigin
+      ? await this.githubClient.getForkIdentity(parsedOrigin, forceRemote)
+      : {
+        status: 'unsupported' as const,
+        reason: 'origin의 fetch/push URL이 동일한 GitHub 저장소를 가리키지 않습니다.',
+      };
+    if (fork.status !== 'verified' || !parsedOrigin) {
+      const snapshot: RepositorySubmissionSnapshot = {
+        status: fork.status === 'unsupported' ? 'unsupported' : 'unavailable',
+        branch,
+        submissionBranch: requestedSubmissionBranch,
+        activeSubmissionWeek: localActiveSubmissionWeek,
+        fork,
+        stagedFiles,
+        otherStagedFiles,
+        pendingCommits: local.commits,
+        localHistory: local.history,
+        forkFiles: [],
+        otherForkFiles: [],
+        blockedReason: localBlockedReason ?? fork.reason,
+        summary: summaryForStatuses(localStatuses),
+        canSync: false,
+        canReturnToMain: false,
+        hasCanonicalRemote: canonicalRemoteName !== undefined,
+        behindOfficialMain: false,
+        blockingTrackedFiles,
+      };
+      return { statuses: localStatuses, pullRequestNumbers: new Map(), snapshot };
+    }
     let remote: RemoteSubmissionState;
     try {
       remote = await this.githubClient.getRemoteSubmission(
@@ -337,15 +391,11 @@ export class GitStatusService implements vscode.Disposable {
         forceRemote,
       );
     } catch (error) {
-      const statuses = localSubmissionStatuses({
-        files,
-        indexPaths,
-        workingPaths,
-        conflictPaths,
-      });
       const snapshot: RepositorySubmissionSnapshot = {
         status: 'unavailable',
-        branch: repository.state.HEAD?.name,
+        branch,
+        submissionBranch: requestedSubmissionBranch,
+        activeSubmissionWeek: localActiveSubmissionWeek,
         fork: {
           ...fork,
           reason: error instanceof Error ? error.message : String(error),
@@ -353,28 +403,23 @@ export class GitStatusService implements vscode.Disposable {
         },
         stagedFiles,
         otherStagedFiles,
-        pendingCommits: [],
+        pendingCommits: local.commits,
+        localHistory: local.history,
         forkFiles: [],
         otherForkFiles: [],
-        summary: summaryForStatuses(statuses),
+        blockedReason: localBlockedReason
+          ?? (error instanceof Error ? error.message : String(error)),
+        summary: summaryForStatuses(localStatuses),
         canSync: false,
         canReturnToMain: false,
-        hasCanonicalRemote: false,
+        hasCanonicalRemote: canonicalRemoteName !== undefined,
         behindOfficialMain: false,
         blockingTrackedFiles,
       };
-      return { statuses, pullRequestNumbers: new Map(), snapshot };
+      return { statuses: localStatuses, pullRequestNumbers: new Map(), snapshot };
     }
 
     const submissionBranch = remote.headBranch ?? requestedSubmissionBranch;
-    const pendingCommits = await this.getLocalPendingCommits(
-      repository,
-      fileByPath,
-      currentBranchWeek ? 'main' : undefined,
-    );
-    const pendingPaths = new Set(
-      pendingCommits.flatMap(({ files }) => files.map(({ relativePath }) => relativePath)),
-    );
     const remotePaths = new Set(remote.compareFiles.map(({ filename }) => filename));
     const forkFiles = remote.compareFiles.flatMap(({ filename }) => {
       const file = fileByPath.get(filename);
@@ -383,6 +428,10 @@ export class GitStatusService implements vscode.Disposable {
     const otherForkFiles = remote.compareFiles
       .map(({ filename }) => filename)
       .filter((filename) => !fileByPath.has(filename));
+    const canonicalMatchingPaths = await this.getCanonicalMatchingPaths(
+      files,
+      remote.canonicalFileHashes,
+    );
     const { statuses, pullRequestNumbers } = projectSubmissionStatuses({
       files,
       indexPaths,
@@ -390,6 +439,7 @@ export class GitStatusService implements vscode.Disposable {
       conflictPaths,
       pendingPaths,
       remote,
+      canonicalMatchingPaths,
     });
 
     const remoteCommits = await this.getRemoteCommits(
@@ -398,7 +448,12 @@ export class GitStatusService implements vscode.Disposable {
       remotePaths,
       fileByPath,
     );
-    const commits = [...remoteCommits, ...pendingCommits];
+    const commitsByHash = new Map<string, SubmissionCommitSnapshot>();
+    for (const commit of [...remoteCommits, ...local.commits]) {
+      const existing = commitsByHash.get(commit.hash);
+      commitsByHash.set(commit.hash, existing?.pushed ? existing : commit);
+    }
+    const commits = [...commitsByHash.values()];
     const activeFiles = [
       ...stagedFiles,
       ...commits.flatMap(({ files: commitFiles }) => commitFiles),
@@ -458,13 +513,16 @@ export class GitStatusService implements vscode.Disposable {
       && !hasDirtyTrackedState
       && !hasUntrackedChanges
       && !repository.state.rebaseCommit
-      && pendingCommits.length === 0;
+      && local.commits.length === 0;
     const branchAllowed = branch === 'main'
       || (currentBranchWeek !== undefined && branch === submissionBranch);
     const hasOtherOpenPullRequest = remote.openPullRequestCount === 1
       && requestedSubmissionBranch !== undefined
       && remote.headBranch !== requestedSubmissionBranch;
-    const blockedReason = remote.openPullRequestCount > 1
+    const blockedReason = localBlockedReason
+      ?? (remote.compareIncomplete
+        ? 'GitHub 조회 한도로 origin 변경 파일을 모두 확인할 수 없어 제출할 수 없습니다.'
+        : remote.openPullRequestCount > 1
       ? '열린 주차 PR이 여러 개입니다. GitHub에서 하나만 남겨 주세요.'
       : hasOtherOpenPullRequest
         ? '다른 주차 PR이 끝나기 전에는 현재 주차를 제출할 수 없습니다.'
@@ -474,7 +532,7 @@ export class GitStatusService implements vscode.Disposable {
         ? '공식 저장소에 반영되지 않은 풀이가 여러 주차에 걸쳐 있습니다.'
       : !branchAllowed
         ? '제출 기능은 main 또는 활성 week-XX 브랜치에서만 사용할 수 있습니다.'
-        : undefined;
+        : undefined);
     const toPullRequestSnapshot = (
       pullRequest: NonNullable<RemoteSubmissionState['latestPullRequest']>,
     ) => ({
@@ -494,6 +552,7 @@ export class GitStatusService implements vscode.Disposable {
       stagedFiles,
       otherStagedFiles,
       pendingCommits: commits,
+      localHistory: local.history,
       forkFiles,
       otherForkFiles,
       activePullRequest: remote.activePullRequest
@@ -517,28 +576,72 @@ export class GitStatusService implements vscode.Disposable {
   private async getLocalPendingCommits(
     repository: GitRepository,
     fileByPath: ReadonlyMap<string, SubmissionFileSnapshot>,
-    fallbackRef?: string,
-  ): Promise<SubmissionCommitSnapshot[]> {
+    currentBranchWeek: number | undefined,
+    canonicalRemoteName: string | undefined,
+  ): Promise<{
+    commits: SubmissionCommitSnapshot[];
+    history: LocalSubmissionHistorySnapshot;
+  }> {
     const upstream = repository.state.HEAD?.upstream;
-    if (!upstream && !fallbackRef) {
-      return [];
+    const usedLocalMainFallback = !upstream
+      && currentBranchWeek !== undefined
+      && canonicalRemoteName === undefined;
+    const ref = upstream
+      ? upstreamRef(upstream)
+      : currentBranchWeek !== undefined
+        ? canonicalRemoteName ? `${canonicalRemoteName}/main` : 'main'
+        : undefined;
+    if (!ref) {
+      return {
+        commits: [],
+        history: { status: 'ready' },
+      };
     }
-    const ref = upstream ? upstreamRef(upstream) : fallbackRef!;
-    let commits: GitCommit[];
     try {
-      commits = await repository.log({
-        range: `${ref}..HEAD`,
+      const mergeBase = await repository.getMergeBase('HEAD', ref);
+      if (!mergeBase) {
+        throw new Error(`${ref}와 현재 브랜치의 공통 기준점을 찾을 수 없습니다.`);
+      }
+      const commits = await repository.log({
+        range: `${mergeBase}..HEAD`,
         reverse: true,
-        maxEntries: 50,
+        maxEntries: 51,
       });
-    } catch {
-      return [];
+      if (commits.length > 50) {
+        throw new Error('로컬 제출 커밋이 너무 많아 화면에 안전하게 표시할 수 없습니다.');
+      }
+      const snapshots = await Promise.all(commits.map((commit) =>
+        this.toCommitSnapshot(repository, commit, false, fileByPath)
+      ));
+      return {
+        commits: snapshots.filter(({ files, otherFiles, fileInspectionStatus }) =>
+          files.length > 0
+          || otherFiles.length > 0
+          || fileInspectionStatus === 'unavailable'
+        ),
+        history: {
+          status: 'ready',
+          baseRef: ref,
+          mergeBase,
+          usedLocalMainFallback,
+          reason: usedLocalMainFallback
+            ? '공식 remote가 없어 로컬 main의 merge-base를 사용했습니다.'
+            : undefined,
+        },
+      };
+    } catch (error) {
+      return {
+        commits: [],
+        history: {
+          status: 'unavailable',
+          baseRef: ref,
+          usedLocalMainFallback,
+          reason: error instanceof Error
+            ? `로컬 커밋 기록을 확인할 수 없습니다: ${error.message}`
+            : '로컬 커밋 기록을 확인할 수 없습니다.',
+        },
+      };
     }
-    return Promise.all(commits.map((commit) =>
-      this.toCommitSnapshot(repository, commit, false, fileByPath)
-    )).then((snapshots) => snapshots.filter(
-      ({ files, otherFiles }) => files.length > 0 || otherFiles.length > 0,
-    ));
   }
 
   private async getRemoteCommits(
@@ -558,7 +661,11 @@ export class GitStatusService implements vscode.Disposable {
           fileByPath,
           remotePaths,
         );
-        if (snapshot.files.length > 0 || snapshot.otherFiles.length > 0) {
+        if (
+          snapshot.files.length > 0
+          || snapshot.otherFiles.length > 0
+          || snapshot.fileInspectionStatus === 'unavailable'
+        ) {
           snapshots.push(snapshot);
         }
       } catch {
@@ -566,6 +673,36 @@ export class GitStatusService implements vscode.Disposable {
       }
     }
     return snapshots;
+  }
+
+  private async getCanonicalMatchingPaths(
+    files: readonly SubmissionFileSnapshot[],
+    canonicalHashes: ReadonlyMap<string, string> | undefined,
+  ): Promise<ReadonlySet<string>> {
+    if (!canonicalHashes) {
+      return new Set();
+    }
+    const matches = new Set<string>();
+    await Promise.all(files.map(async (file) => {
+      const expectedHash = canonicalHashes.get(file.relativePath);
+      if (!expectedHash) {
+        return;
+      }
+      try {
+        const bytes = await vscode.workspace.fs.readFile(vscode.Uri.parse(file.uri));
+        const header = Buffer.from(`blob ${bytes.byteLength}\0`);
+        const actualHash = createHash('sha1')
+          .update(header)
+          .update(bytes)
+          .digest('hex');
+        if (actualHash === expectedHash) {
+          matches.add(file.relativePath);
+        }
+      } catch {
+        // A missing or unreadable local file is not proof that the solution was merged.
+      }
+    }));
+    return matches;
   }
 
   private async toCommitSnapshot(
@@ -577,16 +714,37 @@ export class GitStatusService implements vscode.Disposable {
   ): Promise<SubmissionCommitSnapshot> {
     const paths = new Set<string>();
     const parent = commit.parents[0];
-    if (parent) {
-      try {
-        addRelativeChangePaths(
-          paths,
-          repository.rootUri,
-          await repository.diffBetween(parent, commit.hash),
-        );
-      } catch {
-        // Keep the commit visible even if its file diff cannot be read.
-      }
+    if (!parent) {
+      return {
+        hash: commit.hash,
+        shortHash: commit.hash.slice(0, 7),
+        message: firstLine(commit.message),
+        pushed,
+        files: [],
+        otherFiles: [],
+        fileInspectionStatus: 'unavailable',
+        fileInspectionReason: '부모 커밋이 없어 변경 파일을 확인할 수 없습니다.',
+      };
+    }
+    try {
+      addRelativeChangePaths(
+        paths,
+        repository.rootUri,
+        await repository.diffBetween(parent, commit.hash),
+      );
+    } catch (error) {
+      return {
+        hash: commit.hash,
+        shortHash: commit.hash.slice(0, 7),
+        message: firstLine(commit.message),
+        pushed,
+        files: [],
+        otherFiles: [],
+        fileInspectionStatus: 'unavailable',
+        fileInspectionReason: error instanceof Error
+          ? `변경 파일을 확인할 수 없습니다: ${error.message}`
+          : '변경 파일을 확인할 수 없습니다.',
+      };
     }
     const included = [...paths].filter((relativePath) =>
       !includePaths || includePaths.has(relativePath)
@@ -601,6 +759,7 @@ export class GitStatusService implements vscode.Disposable {
         return file ? [file] : [];
       }),
       otherFiles: included.filter((relativePath) => !fileByPath.has(relativePath)),
+      fileInspectionStatus: 'ready',
     };
   }
 

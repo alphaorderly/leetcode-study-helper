@@ -420,9 +420,29 @@ export class StudyController implements vscode.Disposable {
   async discardOtherTrackedChanges(rootUri: string): Promise<void> {
     this.requireTrustedWorkspace('변경을 되돌리려면 먼저 워크스페이스를 신뢰해야 합니다.');
     const repository = this.requireSubmissionRepository(rootUri, true);
+    const paths = repository.submission?.blockingTrackedFiles
+      .filter(({ kind, state }) => kind === 'other' && state !== 'conflict')
+      .map(({ relativePath }) => relativePath)
+      .sort() ?? [];
+    if (paths.length === 0) {
+      throw new Error('되돌릴 풀이 외 추적 파일 변경이 없습니다.');
+    }
+    const confirmation = '변경 되돌리기';
+    const selected = await vscode.window.showWarningMessage(
+      `풀이 외 추적 파일 ${paths.length}개의 변경을 되돌립니다.`,
+      {
+        modal: true,
+        detail: `${paths.join('\n')}\n\n풀이 파일과 untracked 파일은 보존됩니다.`,
+      },
+      confirmation,
+    );
+    if (selected !== confirmation) {
+      return;
+    }
     await this.gitStatusService.discardOtherTrackedChanges(
       vscode.Uri.parse(rootUri),
       this.submissionSolutions(repository),
+      paths,
     );
     await this.repositoryRefreshSession.refreshGitStatuses(true, true);
   }

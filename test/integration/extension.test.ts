@@ -25,6 +25,26 @@ interface RepositorySnapshot {
   rootUri: string;
   gitRemote?: string;
   problems: ProblemSnapshot[];
+  submission?: {
+    status: 'checking' | 'ready' | 'unsupported' | 'blocked' | 'unavailable';
+    branch?: string;
+    activeSubmissionWeek?: number;
+    pendingCommits: Array<{
+      shortHash: string;
+      message: string;
+      pushed: boolean;
+      files: Array<{ relativePath: string }>;
+      fileInspectionStatus?: 'ready' | 'unavailable';
+    }>;
+    localHistory?: {
+      status: 'ready' | 'unavailable';
+      baseRef?: string;
+      mergeBase?: string;
+    };
+    summary: {
+      pushNeeded: number;
+    };
+  };
 }
 
 interface ExtensionSnapshot {
@@ -396,6 +416,83 @@ suite('LeetCode Study Helper integration', () => {
       ?.problems.find(({ slug }) => slug === 'three-sum');
     assert.equal(deletedProblem?.completed, false);
     assert.deepEqual(deletedProblem?.solutions, []);
+  });
+
+  test('keeps a five-file week-11 commit visible when main and official main diverged', async () => {
+    const initial = await vscode.commands.executeCommand<ExtensionSnapshot>(
+      'leetcodeStudyHelper.__getState',
+    );
+    const studyA = initial?.repositories.find(({ name }) => name === 'study-a');
+    assert.ok(studyA);
+    const repositoryPath = vscode.Uri.parse(studyA.rootUri).fsPath;
+    const { stdout: deletedPathsOutput } = await execFileAsync(
+      'git',
+      ['diff', '--name-only', '--diff-filter=D'],
+      { cwd: repositoryPath },
+    );
+    const deletedPaths = deletedPathsOutput.trim().split('\n').filter(Boolean);
+    const { stdout: expectedMergeBaseOutput } = await execFileAsync(
+      'git',
+      ['merge-base', 'week-11', 'upstream/main'],
+      { cwd: repositoryPath },
+    );
+    const expectedMergeBase = expectedMergeBaseOutput.trim();
+
+    try {
+      await execFileAsync('git', ['switch', 'week-11'], { cwd: repositoryPath });
+      await vscode.commands.executeCommand('leetcodeStudyHelper.refresh');
+      const current = await waitForState((state) => {
+        const repository = state.repositories.find(({ name }) => name === 'study-a');
+        return repository?.submission?.branch === 'week-11'
+          && repository.submission.pendingCommits[0]?.files.length === 5;
+      });
+      const submission = current.repositories
+        .find(({ name }) => name === 'study-a')
+        ?.submission;
+
+      assert.equal(submission?.activeSubmissionWeek, 11);
+      assert.equal(submission?.pendingCommits.length, 1);
+      assert.equal(submission?.pendingCommits[0]?.message, '[CaseUser] WEEK 11 Solutions');
+      assert.equal(submission?.pendingCommits[0]?.pushed, false);
+      assert.equal(submission?.pendingCommits[0]?.fileInspectionStatus, 'ready');
+      assert.deepEqual(
+        submission?.pendingCommits[0]?.files.map(({ relativePath }) => relativePath).sort(),
+        [
+          'binary-tree-maximum-path-sum/CaseUser.py',
+          'graph-valid-tree/CaseUser.py',
+          'merge-intervals/CaseUser.py',
+          'missing-number/CaseUser.py',
+          'reorder-list/CaseUser.py',
+        ],
+      );
+      assert.equal(submission?.summary.pushNeeded, 5);
+      assert.equal(submission?.localHistory?.status, 'ready');
+      assert.equal(submission?.localHistory?.baseRef, 'upstream/main');
+      assert.equal(submission?.localHistory?.mergeBase, expectedMergeBase);
+    } finally {
+      await execFileAsync('git', ['switch', 'main'], { cwd: repositoryPath });
+      for (const relativePath of deletedPaths) {
+        try {
+          await vscode.workspace.fs.delete(vscode.Uri.joinPath(
+            vscode.Uri.parse(studyA.rootUri),
+            ...relativePath.split('/'),
+          ));
+        } catch {
+          // The deletion may already have survived the branch round trip.
+        }
+      }
+      await vscode.commands.executeCommand('leetcodeStudyHelper.refresh');
+      await waitForState((state) => {
+        const repository = state.repositories.find(({ name }) => name === 'study-a');
+        return repository?.submission?.branch === 'main'
+          && repository.problems
+            .filter(({ week }) => week === 11)
+            .every(({ solutions }) => solutions.length === 0)
+          && repository.problems
+            .filter(({ slug }) => deletedPaths.some((path) => path.startsWith(`${slug}/`)))
+            .every(({ solutions }) => solutions.length === 0);
+      });
+    }
   });
 
   test('fixes all matching submissions while ignoring markdown', async () => {

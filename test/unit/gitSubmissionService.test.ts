@@ -10,6 +10,7 @@ const harness = vi.hoisted(() => ({
     save(): Promise<boolean>;
   }>,
   getSession: vi.fn(async (): Promise<{ accessToken: string } | undefined> => undefined),
+  readFile: vi.fn(async (): Promise<Uint8Array> => new TextEncoder().encode('solution')),
 }));
 
 function event(): (listener: (value: unknown) => void) => { dispose(): void } {
@@ -81,6 +82,9 @@ vi.mock('vscode', () => ({
   },
   workspace: {
     textDocuments: harness.textDocuments,
+    fs: {
+      readFile: harness.readFile,
+    },
   },
   authentication: {
     getSession: harness.getSession,
@@ -175,6 +179,12 @@ function createRepository() {
     add: vi.fn(async () => {}),
     revert: vi.fn(async (paths: string[]) => {
       void paths;
+    }),
+    clean: vi.fn(async (paths: string[]) => {
+      const restored = new Set(paths);
+      state.workingTreeChanges = state.workingTreeChanges.filter(
+        (item) => !restored.has(item.uri.fsPath),
+      );
     }),
     commit: vi.fn(async () => {}),
     createBranch: vi.fn(async (name: string, checkout: boolean, ref = 'HEAD') => {
@@ -308,6 +318,8 @@ beforeEach(() => {
   harness.textDocuments.splice(0);
   harness.getSession.mockReset();
   harness.getSession.mockResolvedValue(undefined);
+  harness.readFile.mockReset();
+  harness.readFile.mockResolvedValue(new TextEncoder().encode('solution'));
   vi.mocked(vscode.commands.executeCommand).mockReset();
   vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined);
   vi.mocked(vscode.env.openExternal).mockReset();
@@ -335,6 +347,157 @@ afterEach(() => {
 });
 
 describe('GitStatusService submission actions', () => {
+  it('shows a local week commit from the merge-base when local main has diverged', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    const paths = [
+      'missing-number/CaseUser.py',
+      'reorder-list/CaseUser.py',
+      'graph-valid-tree/CaseUser.py',
+      'merge-intervals/CaseUser.py',
+      'binary-tree-maximum-path-sum/CaseUser.py',
+    ];
+    repository.state.HEAD.name = 'week-11';
+    repository.state.HEAD.commit = 'week-11-tip';
+    repository.state.HEAD.upstream = undefined;
+    repository.state.refs.find(({ name }) => name === 'main')!.commit = 'fork-main';
+    repository.state.refs.find(({ name }) => name === 'upstream/main')!.commit = 'official-newer';
+    repository.getMergeBase.mockImplementation(async (ref1: string, ref2: string) =>
+      ref1 === 'HEAD' && ref2 === 'upstream/main' ? 'official-base' : 'origin'
+    );
+    repository.log.mockImplementation(async (options?: { range?: string }) =>
+      options?.range === 'official-base..HEAD'
+        ? [{
+          hash: 'week-11-tip',
+          message: '[CaseUser] WEEK 11 Solutions',
+          parents: ['official-base'],
+        }]
+        : []
+    );
+    repository.diffBetween.mockImplementation(async (ref1?: string, ref2?: string) =>
+      ref1 === 'official-base' && ref2 === 'week-11-tip'
+        ? paths.map(change)
+        : []
+    );
+    const service = new GitStatusService();
+    const solutions = paths.map((relativePath) => ({
+      name: 'CaseUser.py',
+      uri: `file:///study/${relativePath}`,
+      slug: relativePath.split('/')[0]!,
+      week: 11,
+    }));
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      solutions.map(({ uri: solutionUri }) => solutionUri),
+      true,
+      solutions,
+      true,
+    );
+
+    expect(result.submission?.localHistory).toMatchObject({
+      status: 'ready',
+      baseRef: 'upstream/main',
+      mergeBase: 'official-base',
+    });
+    expect(result.submission?.pendingCommits).toHaveLength(1);
+    expect(result.submission?.pendingCommits[0]).toMatchObject({
+      shortHash: 'week-11',
+      pushed: false,
+      fileInspectionStatus: 'ready',
+    });
+    expect(result.submission?.pendingCommits[0]?.files).toHaveLength(5);
+    expect(result.submission?.activeSubmissionWeek).toBe(11);
+    expect(result.submission?.summary.pushNeeded).toBe(5);
+    expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
+      range: 'official-base..HEAD',
+    }));
+    service.dispose();
+  });
+
+  it('keeps local commits visible when GitHub is unavailable', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.commit = 'local-tip';
+    repository.state.HEAD.upstream = undefined;
+    repository.getMergeBase.mockResolvedValue('official-base');
+    repository.log.mockResolvedValue([{
+      hash: 'local-tip',
+      message: '[CaseUser] WEEK 01 Solutions',
+      parents: ['official-base'],
+    }]);
+    repository.diffBetween.mockResolvedValue([change('two-sum/CaseUser.py')]);
+    vi.stubGlobal('fetch', vi.fn(async () => githubErrorResponse(403)));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(result.submission?.status).toBe('unavailable');
+    expect(result.submission?.pendingCommits).toHaveLength(1);
+    expect(result.submission?.summary.pushNeeded).toBe(1);
+    service.dispose();
+  });
+
+  it('surfaces local log and commit diff failures instead of hiding them', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.commit = 'local-tip';
+    repository.state.HEAD.upstream = undefined;
+    repository.getMergeBase.mockResolvedValue('official-base');
+    repository.log.mockRejectedValueOnce(new Error('log failed'));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+    const solutions = [{
+      name: 'CaseUser.py',
+      uri: solutionUri,
+      slug: 'two-sum',
+      week: 1,
+    }];
+
+    const logFailure = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      solutions,
+      true,
+    );
+
+    expect(logFailure.submission?.localHistory).toMatchObject({
+      status: 'unavailable',
+      reason: expect.stringContaining('log failed'),
+    });
+    expect(logFailure.submission?.blockedReason).toContain('log failed');
+
+    repository.log.mockResolvedValueOnce([{
+      hash: 'local-tip',
+      message: 'local solution',
+      parents: ['official-base'],
+    }]);
+    repository.diffBetween.mockRejectedValueOnce(new Error('diff failed'));
+
+    const diffFailure = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      solutions,
+      true,
+    );
+
+    expect(diffFailure.submission?.pendingCommits).toHaveLength(1);
+    expect(diffFailure.submission?.pendingCommits[0]).toMatchObject({
+      fileInspectionStatus: 'unavailable',
+      fileInspectionReason: expect.stringContaining('diff failed'),
+    });
+    expect(diffFailure.submission?.blockedReason).toContain('변경 파일');
+    service.dispose();
+  });
+
   it('saves and stages a solution, then unstages only the index entry', async () => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
     const save = vi.fn(async () => true);
@@ -364,7 +527,7 @@ describe('GitStatusService submission actions', () => {
     expect(save).toHaveBeenCalledOnce();
     expect(repository.add).toHaveBeenCalledWith(['/study/two-sum/CaseUser.py']);
     expect(repository.revert).toHaveBeenCalledWith(['/study/two-sum/CaseUser.py']);
-    expect(repository.status).toHaveBeenCalledTimes(4);
+    expect(repository.status).toHaveBeenCalledTimes(5);
     service.dispose();
   });
 
@@ -534,7 +697,11 @@ describe('GitStatusService submission actions', () => {
       if (requestUrl.includes('/git/trees/main')) {
         return githubResponse({
           truncated: false,
-          tree: [{ path: 'two-sum/CaseUser.py', type: 'blob' }],
+          tree: [{
+            path: 'two-sum/CaseUser.py',
+            type: 'blob',
+            sha: 'e99d9f2f8b3116e6052ed78007ff65b2710b6065',
+          }],
         });
       }
       if (requestUrl.includes('/compare/')) {
@@ -791,7 +958,7 @@ describe('GitStatusService submission actions', () => {
     )).rejects.toThrow('Week 1 풀이 외 변경');
 
     expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
-      range: 'upstream/main..week-01',
+      range: 'origin..week-01',
     }));
     expect(repository.checkout).not.toHaveBeenCalled();
     expect(repository.commit).not.toHaveBeenCalled();
@@ -859,7 +1026,7 @@ describe('GitStatusService submission actions', () => {
     );
 
     expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
-      range: 'upstream/main..HEAD',
+      range: 'local..HEAD',
     }));
     expect(repository.createBranch).not.toHaveBeenCalled();
     expect(repository.commit).toHaveBeenCalledOnce();
@@ -903,7 +1070,7 @@ describe('GitStatusService submission actions', () => {
     )).rejects.toThrow('Week 1 풀이 외 변경');
 
     expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
-      range: 'upstream/main..HEAD',
+      range: 'local..HEAD',
     }));
     expect(repository.commit).not.toHaveBeenCalled();
     service.dispose();
@@ -1019,9 +1186,64 @@ describe('GitStatusService submission actions', () => {
       prune: true,
     });
     expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
-      range: 'upstream/main..HEAD',
+      range: 'local..HEAD',
     }));
     expect(repository.push).toHaveBeenCalledWith('origin', 'week-01', true);
+    service.dispose();
+  });
+
+  it('blocks push when GitHub Compare reaches its file limit', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.upstream = undefined;
+    repository.state.HEAD.commit = 'local';
+    repository.log.mockResolvedValue([{
+      hash: 'local',
+      message: '[CaseUser] WEEK 01 Solutions',
+      parents: ['origin'],
+    }]);
+    repository.diffBetween.mockResolvedValue([change('two-sum/CaseUser.py')]);
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({ truncated: false, tree: [] });
+      }
+      if (requestUrl.includes(':week-01')) {
+        return githubResponse({
+          ahead_by: 1,
+          behind_by: 0,
+          total_commits: 1,
+          files: Array.from(
+            { length: 300 },
+            (_, index) => ({ filename: `problem-${index}/CaseUser.py`, status: 'added' }),
+          ),
+          commits: [{ sha: 'remote', commit: {}, parents: [{ sha: 'origin' }] }],
+        });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({ ahead_by: 0, behind_by: 0, files: [], commits: [] });
+      }
+      return githubResponse([]);
+    }));
+    const service = new GitStatusService();
+
+    await expect(service.push(
+      uri('file:///study') as never,
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }],
+    )).rejects.toThrow('GitHub 조회 한도');
+
+    expect(repository.push).not.toHaveBeenCalled();
     service.dispose();
   });
 
@@ -1062,7 +1284,7 @@ describe('GitStatusService submission actions', () => {
     )).rejects.toThrow('서로 다른 주차');
 
     expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
-      range: 'upstream/main..HEAD',
+      range: 'local..HEAD',
     }));
     expect(repository.push).not.toHaveBeenCalled();
     service.dispose();
@@ -1168,9 +1390,82 @@ describe('GitStatusService submission actions', () => {
     );
 
     expect(repository.log).toHaveBeenCalledWith(expect.objectContaining({
-      range: 'origin/week-01..HEAD',
+      range: 'remote-tip..HEAD',
     }));
     expect(repository.push).toHaveBeenCalledWith('origin', 'week-01', false);
+    service.dispose();
+  });
+
+  it('aborts push when HEAD changes during remote validation', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.commit = 'local-tip';
+    repository.state.HEAD.upstream = undefined;
+    repository.log.mockResolvedValue([{
+      hash: 'local-tip',
+      message: '[CaseUser] WEEK 01 Solutions',
+      parents: ['origin'],
+    }]);
+    repository.diffBetween.mockResolvedValue([change('two-sum/CaseUser.py')]);
+    let originFetches = 0;
+    repository.fetch.mockImplementation(async (options?: { remote?: string }) => {
+      if (options?.remote === 'origin') {
+        originFetches += 1;
+        if (originFetches === 2) {
+          repository.state.HEAD.commit = 'changed-externally';
+        }
+      }
+    });
+    const service = new GitStatusService();
+
+    await expect(service.push(
+      uri('file:///study') as never,
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }],
+    )).rejects.toThrow('push 직전에 브랜치 또는 HEAD가 변경');
+
+    expect(repository.push).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('aborts a mutation when origin changes during fork verification', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-01';
+    repository.state.HEAD.commit = 'local-tip';
+    repository.state.indexChanges = [change('two-sum/CaseUser.py')];
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      repository.state.remotes[0]!.pushUrl =
+        'git@github.com:CaseUser/leetcode-study.git';
+      return githubResponse({
+        fork: true,
+        source: { full_name: 'DaleStudy/leetcode-study' },
+      });
+    }));
+    const service = new GitStatusService();
+
+    await expect(service.commit(
+      uri('file:///study') as never,
+      '[CaseUser] WEEK 01 Solutions',
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        relativePath: 'two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }],
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }],
+    )).rejects.toThrow('origin URL이 변경');
+
+    expect(repository.commit).not.toHaveBeenCalled();
     service.dispose();
   });
 
@@ -1263,6 +1558,35 @@ describe('GitStatusService submission actions', () => {
     );
     expect(repository.merge).toHaveBeenCalledWith('upstream/main');
     expect(repository.push).toHaveBeenCalledWith('origin', 'main', false);
+    service.dispose();
+  });
+
+  it('preserves the synchronized local main when origin push fails', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.refs.find(({ name }) => name === 'upstream/main')!.commit = 'upstream';
+    repository.getMergeBase.mockImplementation(async (_ref1: string, ref2: string) => {
+      if (ref2 === 'origin/main') {
+        return 'origin';
+      }
+      if (ref2 === 'upstream/main') {
+        return repository.state.HEAD.commit === 'synced' ? 'upstream' : 'origin';
+      }
+      return 'origin';
+    });
+    repository.merge.mockImplementation(async (ref: string) => {
+      if (ref === 'upstream/main') {
+        repository.state.HEAD.commit = 'synced';
+        repository.state.refs.find(({ name }) => name === 'main')!.commit = 'synced';
+      }
+    });
+    repository.push.mockRejectedValueOnce(new Error('network down'));
+    const service = new GitStatusService();
+
+    await expect(service.syncFork(uri('file:///study') as never))
+      .rejects.toThrow('로컬 main에는 동기화 결과가 안전하게 남아 있습니다');
+
+    expect(repository.state.HEAD.commit).toBe('synced');
+    expect(repository.mergeAbort).not.toHaveBeenCalled();
     service.dispose();
   });
 
@@ -1692,14 +2016,16 @@ describe('GitStatusService submission actions', () => {
 
   it('discards only non-solution tracked changes', async () => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.indexChanges = [change('README.md')];
     repository.state.workingTreeChanges = [
       change('README.md'),
       change('two-sum/CaseUser.py'),
     ];
+    repository.state.untrackedChanges = [change('notes.txt')];
     repository.revert.mockImplementation(async (paths: string[]) => {
-      const restored = new Set(paths);
-      repository.state.workingTreeChanges = repository.state.workingTreeChanges.filter(
-        (item) => !restored.has(item.uri.fsPath),
+      const unstaged = new Set(paths);
+      repository.state.indexChanges = repository.state.indexChanges.filter(
+        (item) => !unstaged.has(item.uri.fsPath),
       );
     });
     const service = new GitStatusService();
@@ -1712,9 +2038,34 @@ describe('GitStatusService submission actions', () => {
         slug: 'two-sum',
         week: 1,
       }],
+      ['README.md'],
     );
 
     expect(repository.revert).toHaveBeenCalledWith(['/study/README.md']);
+    expect(repository.clean).toHaveBeenCalledWith(['/study/README.md']);
+    expect(repository.state.workingTreeChanges.map(({ uri: changeUri }) => changeUri.fsPath))
+      .toEqual(['/study/two-sum/CaseUser.py']);
+    expect(repository.state.untrackedChanges.map(({ uri: changeUri }) => changeUri.fsPath))
+      .toEqual(['/study/notes.txt']);
+    service.dispose();
+  });
+
+  it('does not restore a non-solution path added after confirmation', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.workingTreeChanges = [
+      change('README.md'),
+      change('new-config.json'),
+    ];
+    const service = new GitStatusService();
+
+    await expect(service.discardOtherTrackedChanges(
+      uri('file:///study') as never,
+      [],
+      ['README.md'],
+    )).rejects.toThrow('변경 목록이 달라졌습니다');
+
+    expect(repository.revert).not.toHaveBeenCalled();
+    expect(repository.clean).not.toHaveBeenCalled();
     service.dispose();
   });
 
@@ -2119,7 +2470,11 @@ describe('GitStatusService submission actions', () => {
       if (requestUrl.includes('/git/trees/main')) {
         return githubResponse({
           truncated: false,
-          tree: [{ path: 'two-sum/CaseUser.py', type: 'blob' }],
+          tree: [{
+            path: 'two-sum/CaseUser.py',
+            type: 'blob',
+            sha: 'e99d9f2f8b3116e6052ed78007ff65b2710b6065',
+          }],
         });
       }
       return githubResponse([]);
@@ -2138,6 +2493,52 @@ describe('GitStatusService submission actions', () => {
     expect(result.submissionStatuses?.get(solutionUri)).toBe('merged');
     expect(result.submission?.activeSubmissionWeek).toBeUndefined();
     expect(result.submission?.summary.merged).toBe(1);
+    service.dispose();
+  });
+
+  it('does not mark a same-path solution merged when its Git blob differs', async () => {
+    harness.readFile.mockResolvedValueOnce(new TextEncoder().encode('different solution'));
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({
+          ahead_by: 0,
+          behind_by: 0,
+          files: [],
+          commits: [],
+        });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({
+          truncated: false,
+          tree: [{
+            path: 'two-sum/CaseUser.py',
+            type: 'blob',
+            sha: 'e99d9f2f8b3116e6052ed78007ff65b2710b6065',
+          }],
+        });
+      }
+      return githubResponse([]);
+    }));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(result.submissionStatuses?.get(solutionUri)).toBe('unknown');
+    expect(result.submission?.summary.merged).toBe(0);
     service.dispose();
   });
 
@@ -2161,7 +2562,11 @@ describe('GitStatusService submission actions', () => {
       if (requestUrl.includes('/git/trees/main')) {
         return githubResponse({
           truncated: false,
-          tree: [{ path: 'two-sum/CaseUser.py', type: 'blob' }],
+          tree: [{
+            path: 'two-sum/CaseUser.py',
+            type: 'blob',
+            sha: 'e99d9f2f8b3116e6052ed78007ff65b2710b6065',
+          }],
         });
       }
       return githubResponse([]);
@@ -2221,7 +2626,11 @@ describe('GitStatusService submission actions', () => {
       if (requestUrl.includes('/git/trees/main')) {
         return githubResponse({
           truncated: false,
-          tree: mergedPaths.map((entryPath) => ({ path: entryPath, type: 'blob' })),
+          tree: mergedPaths.map((entryPath) => ({
+            path: entryPath,
+            type: 'blob',
+            sha: 'e99d9f2f8b3116e6052ed78007ff65b2710b6065',
+          })),
         });
       }
       return githubResponse([]);
@@ -2345,7 +2754,11 @@ describe('GitStatusService submission actions', () => {
         canonicalTreeRequests += 1;
         return githubResponse({
           truncated: false,
-          tree: [{ path: 'two-sum/CaseUser.py', type: 'blob' }],
+          tree: [{
+            path: 'two-sum/CaseUser.py',
+            type: 'blob',
+            sha: 'e99d9f2f8b3116e6052ed78007ff65b2710b6065',
+          }],
         });
       }
       return githubResponse([]);

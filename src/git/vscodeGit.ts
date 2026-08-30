@@ -64,6 +64,7 @@ export interface GitRepository {
   }): Promise<GitCommit[]>;
   add(paths: string[]): Promise<void>;
   revert(paths: string[]): Promise<void>;
+  clean(paths: string[]): Promise<void>;
   commit(message: string, options?: {
     requireUserConfig?: boolean;
     postCommitCommand?: string | null;
@@ -157,7 +158,7 @@ function uriContains(parent: vscode.Uri, child: vscode.Uri): boolean {
   return child.path === parent.path || child.path.startsWith(parentPath);
 }
 
-function repositoryFingerprint(repository: GitRepository): string {
+export function repositoryFingerprint(repository: GitRepository): string {
   const {
     HEAD,
     remotes,
@@ -170,6 +171,7 @@ function repositoryFingerprint(repository: GitRepository): string {
   const changeFingerprint = (changes: readonly GitChange[]): string[] =>
     changes.map(({ uri }) => uri.toString()).sort();
   return JSON.stringify([
+    HEAD?.name,
     HEAD?.commit,
     HEAD?.upstream?.remote,
     HEAD?.upstream?.name,

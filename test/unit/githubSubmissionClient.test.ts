@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   GitHubSubmissionClient,
+  parseConsistentRemote,
   resolveCanonicalRemoteName,
 } from '../../src/git/githubSubmissionClient';
 
@@ -23,6 +24,19 @@ function errorResponse(status: number): Response {
 const CANONICAL_URL = 'https://github.com/DaleStudy/leetcode-study.git';
 
 describe('resolveCanonicalRemoteName', () => {
+  it('rejects a remote when either configured URL cannot be parsed', () => {
+    expect(parseConsistentRemote({
+      name: 'origin',
+      fetchUrl: 'https://github.com/CaseUser/leetcode-study.git',
+      pushUrl: 'not-a-github-url',
+    })).toBeUndefined();
+    expect(parseConsistentRemote({
+      name: 'origin',
+      fetchUrl: 'not-a-github-url',
+      pushUrl: 'git@github.com:CaseUser/leetcode-study.git',
+    })).toBeUndefined();
+  });
+
   it('returns undefined when no remote points at the canonical repository', () => {
     expect(resolveCanonicalRemoteName([{
       name: 'origin',
@@ -72,6 +86,99 @@ afterEach(() => {
 });
 
 describe('GitHubSubmissionClient branch state', () => {
+  it('loads every page of open PRs and PR files', async () => {
+    const firstPagePulls = Array.from({ length: 100 }, (_, index) => ({
+      number: index + 1,
+      title: `Other ${index + 1}`,
+      html_url: `https://github.com/DaleStudy/leetcode-study/pull/${index + 1}`,
+      state: 'open' as const,
+      head: {
+        ref: 'not-a-week',
+        repo: { full_name: 'OtherUser/leetcode-study' },
+      },
+    }));
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requests.push(url);
+      const page = new URL(url).searchParams.get('page');
+      if (url.includes('/pulls?state=open') && page === '1') {
+        return response(firstPagePulls);
+      }
+      if (url.includes('/pulls?state=open') && page === '2') {
+        return response([{
+          number: 101,
+          title: '[CaseUser] WEEK 01 Solutions',
+          html_url: 'https://github.com/DaleStudy/leetcode-study/pull/101',
+          state: 'open',
+          head: {
+            ref: 'week-01',
+            user: { login: 'CaseUser' },
+            repo: { full_name: 'CaseUser/leetcode-study' },
+          },
+        }]);
+      }
+      if (url.includes('/pulls/101/files') && page === '1') {
+        return response(Array.from(
+          { length: 100 },
+          (_, index) => ({ filename: `problem-${index + 1}/CaseUser.py` }),
+        ));
+      }
+      if (url.includes('/pulls/101/files') && page === '2') {
+        return response([{ filename: 'problem-101/CaseUser.py' }]);
+      }
+      if (url.includes('/git/trees/main')) {
+        return response({ truncated: false, tree: [] });
+      }
+      if (url.includes('/compare/')) {
+        return response({ ahead_by: 1, behind_by: 0, files: [], commits: [] });
+      }
+      return response([]);
+    }));
+    const client = new GitHubSubmissionClient();
+
+    const state = await client.getRemoteSubmission(remote, 'week-01', true);
+
+    expect(state.openPullRequestCount).toBe(1);
+    expect(state.pullRequestFiles).toHaveLength(101);
+    expect(requests.some((url) => url.includes('/pulls?state=open') && url.includes('page=2')))
+      .toBe(true);
+    expect(requests.some((url) => url.includes('/pulls/101/files') && url.includes('page=2')))
+      .toBe(true);
+    client.dispose();
+  });
+
+  it('marks compare results incomplete at the GitHub file limit', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/git/trees/main')) {
+        return response({ truncated: false, tree: [] });
+      }
+      if (url.includes(':week-01')) {
+        return response({
+          ahead_by: 1,
+          behind_by: 0,
+          total_commits: 1,
+          files: Array.from(
+            { length: 300 },
+            (_, index) => ({ filename: `problem-${index}/CaseUser.py`, status: 'added' }),
+          ),
+          commits: [{ sha: 'commit', commit: {}, parents: [{ sha: 'base' }] }],
+        });
+      }
+      if (url.includes('/compare/')) {
+        return response({ ahead_by: 0, behind_by: 0, files: [], commits: [] });
+      }
+      return response([]);
+    }));
+    const client = new GitHubSubmissionClient();
+
+    const state = await client.getRemoteSubmission(remote, 'week-01', true);
+
+    expect(state.compareIncomplete).toBe(true);
+    client.dispose();
+  });
+
   it('keeps remote submission cache entries separate per week branch', async () => {
     const requests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
@@ -139,6 +246,30 @@ describe('GitHubSubmissionClient branch state', () => {
 });
 
 describe('GitHubSubmissionClient authentication', () => {
+  it('ends a stalled GitHub request at the configured timeout', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn((_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('request timed out', 'AbortError'));
+        });
+      })
+    ));
+    const client = new GitHubSubmissionClient();
+
+    try {
+      const identityPromise = client.getForkIdentity(remote, true);
+      await vi.advanceTimersByTimeAsync(8_000);
+      const identity = await identityPromise;
+
+      expect(identity.status).toBe('unavailable');
+      expect(identity.reason).toContain('request timed out');
+    } finally {
+      client.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('sends a bearer token when an access token is available', async () => {
     const fetchMock = vi.fn(async () => response({ fork: false }));
     vi.stubGlobal('fetch', fetchMock);

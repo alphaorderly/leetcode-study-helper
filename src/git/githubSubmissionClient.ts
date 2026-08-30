@@ -30,6 +30,7 @@ export interface GitHubCompareCommit {
 interface GitHubCompareResponse {
   readonly ahead_by?: number;
   readonly behind_by?: number;
+  readonly total_commits?: number;
   readonly files?: GitHubCompareFile[];
   readonly commits?: GitHubCompareCommit[];
 }
@@ -54,6 +55,7 @@ interface GitHubPullFile {
 interface GitHubTreeEntry {
   readonly path?: string;
   readonly type?: string;
+  readonly sha?: string;
 }
 
 interface GitHubTreeResponse {
@@ -77,6 +79,13 @@ export interface RemoteSubmissionState {
   readonly latestPullRequest?: GitHubPullRequest;
   readonly pullRequestFiles: string[];
   readonly canonicalFilePaths?: ReadonlySet<string>;
+  readonly canonicalFileHashes?: ReadonlyMap<string, string>;
+  readonly compareIncomplete?: boolean;
+}
+
+interface CanonicalFileTree {
+  readonly paths: ReadonlySet<string>;
+  readonly hashes: ReadonlyMap<string, string>;
 }
 
 interface CachedRemoteValue<T> {
@@ -113,8 +122,16 @@ function sameGitHubRepository(
 export function parseConsistentRemote(
   remote: GitRemote | undefined,
 ): ParsedGitHubRemote | undefined {
-  const fetch = parseGitHubRemote(remote?.fetchUrl);
-  const push = parseGitHubRemote(remote?.pushUrl);
+  if (!remote) {
+    return undefined;
+  }
+  const fetchUrl = remote.fetchUrl?.trim();
+  const pushUrl = remote.pushUrl?.trim();
+  const fetch = parseGitHubRemote(fetchUrl);
+  const push = parseGitHubRemote(pushUrl);
+  if ((fetchUrl && !fetch) || (pushUrl && !push)) {
+    return undefined;
+  }
   if (fetch && push && !sameGitHubRepository(fetch, push)) {
     return undefined;
   }
@@ -131,17 +148,26 @@ export function resolveCanonicalRemoteName(
   remotes: readonly GitRemote[],
 ): string | undefined {
   const namedUpstream = remotes.find(({ name }) => name === 'upstream');
-  if (
-    namedUpstream
-    && !isCanonicalRemote(namedUpstream.fetchUrl ?? namedUpstream.pushUrl)
-  ) {
-    throw new Error('기존 upstream이 DaleStudy/leetcode-study를 가리키지 않습니다.');
+  if (namedUpstream) {
+    const parsed = parseConsistentRemote(namedUpstream);
+    if (
+      !parsed
+      || parsed.owner.toLowerCase() !== CANONICAL_OWNER.toLowerCase()
+      || parsed.repository.toLowerCase() !== CANONICAL_REPOSITORY.toLowerCase()
+    ) {
+      throw new Error(
+        '기존 upstream이 DaleStudy/leetcode-study를 가리키지 않습니다. fetch/push URL을 모두 확인해 주세요.',
+      );
+    }
   }
-  const canonicalNames = remotes.flatMap((remote) =>
-    isCanonicalRemote(remote.fetchUrl) || isCanonicalRemote(remote.pushUrl)
+  const canonicalNames = remotes.flatMap((remote) => {
+    const parsed = parseConsistentRemote(remote);
+    return parsed
+      && parsed.owner.toLowerCase() === CANONICAL_OWNER.toLowerCase()
+      && parsed.repository.toLowerCase() === CANONICAL_REPOSITORY.toLowerCase()
       ? [remote.name]
-      : []
-  );
+      : [];
+  });
   if (canonicalNames.includes('upstream')) {
     return 'upstream';
   }
@@ -176,7 +202,7 @@ export class GitHubSubmissionClient {
     new Map<string, CachedRemoteValue<ForkIdentitySnapshot>>();
   private readonly remoteSubmissionCache =
     new Map<string, CachedRemoteValue<RemoteSubmissionState>>();
-  private canonicalTreeCache: CachedRemoteValue<ReadonlySet<string>> | undefined;
+  private canonicalTreeCache: CachedRemoteValue<CanonicalFileTree> | undefined;
 
   constructor(
     private readonly getAccessToken: () => Promise<string | undefined> = async () =>
@@ -243,10 +269,10 @@ export class GitHubSubmissionClient {
     if (!force && cached && cached.expiresAt > Date.now()) {
       return cached.value;
     }
-    const pullsPath = `/repos/${CANONICAL_FULL_NAME}/pulls?state=open&base=main&per_page=100`;
-    const [allOpenPullRequests, canonicalFilePaths, mainCompare] = await Promise.all([
-      this.githubJson<GitHubPullRequest[]>(pullsPath),
-      this.getCanonicalFilePaths(force),
+    const pullsPath = `/repos/${CANONICAL_FULL_NAME}/pulls?state=open&base=main`;
+    const [allOpenPullRequests, canonicalFiles, mainCompare] = await Promise.all([
+      this.githubPagedJson<GitHubPullRequest>(pullsPath),
+      this.getCanonicalFiles(force),
       this.githubJson<GitHubCompareResponse>(
         `/repos/${CANONICAL_FULL_NAME}/compare/main...${encodeURIComponent(remote.owner)}:main`,
       ),
@@ -273,8 +299,8 @@ export class GitHubSubmissionClient {
       ))[0]
       : undefined);
     const pullRequestFiles = latestPullRequest
-      ? (await this.githubJson<GitHubPullFile[]>(
-        `/repos/${CANONICAL_FULL_NAME}/pulls/${latestPullRequest.number}/files?per_page=100`,
+      ? (await this.githubPagedJson<GitHubPullFile>(
+        `/repos/${CANONICAL_FULL_NAME}/pulls/${latestPullRequest.number}/files`,
       )).map(({ filename }) => filename)
       : [];
     const value: RemoteSubmissionState = {
@@ -286,7 +312,15 @@ export class GitHubSubmissionClient {
       activePullRequest,
       latestPullRequest,
       pullRequestFiles,
-      canonicalFilePaths,
+      canonicalFilePaths: canonicalFiles?.paths,
+      canonicalFileHashes: canonicalFiles?.hashes,
+      compareIncomplete: compare !== undefined && (
+        (compare.files?.length ?? 0) >= 300
+        || (
+          typeof compare.total_commits === 'number'
+          && compare.total_commits > (compare.commits?.length ?? 0)
+        )
+      ),
     };
     this.remoteSubmissionCache.set(key, {
       expiresAt: Date.now() + REMOTE_CACHE_MS,
@@ -309,9 +343,9 @@ export class GitHubSubmissionClient {
     this.clearCaches();
   }
 
-  private async getCanonicalFilePaths(
+  private async getCanonicalFiles(
     force: boolean,
-  ): Promise<ReadonlySet<string> | undefined> {
+  ): Promise<CanonicalFileTree | undefined> {
     const cached = this.canonicalTreeCache;
     if (!force && cached && cached.expiresAt > Date.now()) {
       return cached.value;
@@ -323,10 +357,15 @@ export class GitHubSubmissionClient {
       if (response.truncated || !Array.isArray(response.tree)) {
         return undefined;
       }
-      const value = new Set(
-        response.tree.flatMap(({ path: entryPath, type }) =>
-          type === 'blob' && entryPath ? [entryPath] : []),
+      const entries = response.tree.filter(
+        ({ path: entryPath, type }) => type === 'blob' && Boolean(entryPath),
       );
+      const value: CanonicalFileTree = {
+        paths: new Set(entries.map(({ path: entryPath }) => entryPath!)),
+        hashes: new Map(entries.flatMap(({ path: entryPath, sha }) =>
+          entryPath && sha ? [[entryPath, sha] as const] : []
+        )),
+      };
       this.canonicalTreeCache = {
         expiresAt: Date.now() + REMOTE_CACHE_MS,
         value,
@@ -361,6 +400,21 @@ export class GitHubSubmissionClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private async githubPagedJson<T>(apiPath: string): Promise<T[]> {
+    const values: T[] = [];
+    for (let page = 1; page <= 20; page += 1) {
+      const separator = apiPath.includes('?') ? '&' : '?';
+      const batch = await this.githubJson<T[]>(
+        `${apiPath}${separator}per_page=100&page=${page}`,
+      );
+      values.push(...batch);
+      if (batch.length < 100) {
+        return values;
+      }
+    }
+    throw new Error('GitHub 목록이 너무 커서 안전하게 전체 상태를 확인할 수 없습니다.');
   }
 
   private async githubJsonOptional<T>(apiPath: string): Promise<T | undefined> {

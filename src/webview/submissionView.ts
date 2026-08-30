@@ -155,11 +155,20 @@ function renderSubmissionGraph(
     ));
     return graph;
   }
-  if (submission.status === 'unsupported' || submission.status === 'unavailable') {
+  const hasLocalGraphContent = submission.stagedFiles.length > 0
+    || submission.otherStagedFiles.length > 0
+    || submission.pendingCommits.some(({ pushed }) => !pushed);
+  if (submission.status === 'unsupported') {
     const reason = submission.fork.reason
       ?? 'DaleStudy/leetcode-study 포크에서만 제출 기능을 사용할 수 있습니다.';
+    graph.append(element('p', 'empty-state', reason));
+    return graph;
+  }
+  if (submission.status === 'unavailable') {
+    const reason = submission.fork.reason
+      ?? 'GitHub 원격 상태를 확인할 수 없습니다.';
+    const region = element('div', 'submission-auth');
     if (submission.fork.needsGitHubSignIn) {
-      const region = element('div', 'submission-auth');
       region.append(element('p', 'empty-state', reason));
       const button = element('button', 'primary-button', 'GitHub으로 로그인');
       button.type = 'button';
@@ -167,10 +176,27 @@ function renderSubmissionGraph(
       button.addEventListener('click', () => post({ type: 'signInGitHub' }));
       region.append(button);
       graph.append(region);
+    } else {
+      region.append(element('p', 'empty-state', reason));
+      graph.append(region);
+    }
+    if (!hasLocalGraphContent) {
       return graph;
     }
-    graph.append(element('p', 'empty-state', reason));
-    return graph;
+  }
+  if (submission.localHistory?.status === 'unavailable') {
+    graph.append(element(
+      'p',
+      'issue submission-blocked',
+      submission.localHistory.reason ?? '로컬 커밋 기록을 확인할 수 없습니다.',
+    ));
+  } else if (submission.localHistory?.usedLocalMainFallback) {
+    graph.append(element(
+      'p',
+      'issue submission-blocked',
+      submission.localHistory.reason
+        ?? '공식 remote가 없어 로컬 main 기준으로 커밋을 표시합니다.',
+    ));
   }
   if (submission.blockedReason) {
     graph.append(element('p', 'issue submission-blocked', submission.blockedReason));
@@ -194,6 +220,7 @@ function renderSubmissionGraph(
   }
 
   const hasUnpushed = submission.pendingCommits.some(({ pushed }) => !pushed);
+  const remoteActionsUnavailable = submission.status === 'unavailable';
   const pullRequestSnapshot = submission.pullRequest ?? submission.activePullRequest;
   const hasGraphContent = submission.stagedFiles.length > 0
     || submission.otherStagedFiles.length > 0
@@ -270,6 +297,7 @@ function renderSubmissionGraph(
   pullRequestButton.type = 'button';
   pullRequestButton.disabled = ui.busy || (!pullRequestSnapshot && (
     Boolean(submission.blockedReason)
+    || remoteActionsUnavailable
     || hasUnpushed
     || submission.forkFiles.length === 0
   ));
@@ -314,7 +342,12 @@ function renderSubmissionGraph(
       'origin에 push',
     );
     pushButton.type = 'button';
-    pushButton.disabled = ui.busy || Boolean(submission.blockedReason);
+    pushButton.disabled = ui.busy
+      || remoteActionsUnavailable
+      || Boolean(submission.blockedReason);
+    if (remoteActionsUnavailable) {
+      pushButton.title = 'GitHub 원격 상태를 확인한 뒤 push할 수 있습니다.';
+    }
     pushButton.addEventListener('click', () =>
       post({ type: 'pushActiveWeek', rootUri: repository.rootUri })
     );
@@ -348,6 +381,13 @@ function renderSubmissionGraph(
       );
       commitNode.body.append(warning);
     }
+    if (commit.fileInspectionStatus === 'unavailable') {
+      commitNode.body.append(element(
+        'p',
+        'issue',
+        commit.fileInspectionReason ?? '이 커밋의 변경 파일을 확인할 수 없습니다.',
+      ));
+    }
     graph.append(commitNode.node);
   }
 
@@ -377,7 +417,9 @@ function renderSubmissionGraph(
       '이 주차 커밋',
     );
     commitButton.type = 'button';
-    commitButton.disabled = ui.busy || Boolean(submission.blockedReason);
+    commitButton.disabled = ui.busy
+      || remoteActionsUnavailable
+      || Boolean(submission.blockedReason);
     commitButton.addEventListener('click', () => {
       messages[key] = input.value;
       post({

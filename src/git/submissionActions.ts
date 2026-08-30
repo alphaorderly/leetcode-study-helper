@@ -6,6 +6,7 @@ import type {
 import {
   CANONICAL_REMOTE_URL,
   type GitHubSubmissionClient,
+  type ParsedGitHubRemote,
   parseConsistentRemote,
   pullRequestStatus,
   resolveCanonicalRemoteName,
@@ -99,6 +100,7 @@ export class SubmissionActions {
     solutions: readonly SubmissionSolution[],
   ): Promise<void> {
     const repository = await this.requireSubmissionMutation(repositoryRoot, false);
+    const verifiedOrigin = this.requireOrigin(repository);
     const normalizedMessage = message.trim();
     if (!normalizedMessage) {
       throw new Error('커밋 메시지를 입력해 주세요.');
@@ -148,8 +150,9 @@ export class SubmissionActions {
       throw new Error('브랜치를 전환하기 전에 스테이징되지 않은 변경과 충돌을 먼저 정리해 주세요.');
     }
     const fileByPath = this.fileByPath(repository, solutions);
+    let canonicalMain: string;
     if (currentBranch === 'main') {
-      const canonicalMain = await this.requireSynchronizedMain(repository, solutions);
+      canonicalMain = await this.requireSynchronizedMain(repository, solutions);
       await this.checkoutSubmissionBranch(
         repository,
         submissionBranch,
@@ -165,7 +168,7 @@ export class SubmissionActions {
         throw new Error('브랜치 전환 중 스테이징 상태가 변경되어 커밋하지 않았습니다.');
       }
     } else {
-      const canonicalMain = await this.fetchCanonicalMain(repository);
+      canonicalMain = await this.fetchCanonicalMain(repository);
       await this.requireSafeSubmissionHistory(
         repository,
         canonicalMain,
@@ -174,6 +177,41 @@ export class SubmissionActions {
         fileByPath,
       );
     }
+    const canonicalCommit = (await repository.getCommit(canonicalMain)).hash;
+    await repository.status();
+    this.requireCleanOperationState(repository);
+    this.requireUnchangedOrigin(repository, verifiedOrigin);
+    if (repository.state.HEAD?.name !== submissionBranch) {
+      throw new Error('커밋 직전에 제출 브랜치가 변경되어 중단했습니다.');
+    }
+    if ((await repository.getCommit(canonicalMain)).hash !== canonicalCommit) {
+      throw new Error('커밋 준비 중 공식 main이 변경되었습니다. 제출 상태를 새로고침해 주세요.');
+    }
+    const liveIndexPaths = relativeChangePaths(
+      repository.rootUri,
+      repository.state.indexChanges,
+    );
+    if (!setsEqual(liveIndexPaths, expectedPaths)) {
+      throw new Error('커밋 직전에 스테이징 상태가 변경되어 중단했습니다.');
+    }
+    const liveConflictPaths = relativeChangePaths(
+      repository.rootUri,
+      repository.state.mergeChanges,
+    );
+    const liveWorkingPaths = relativeChangePaths(repository.rootUri, [
+      ...repository.state.workingTreeChanges,
+      ...repository.state.untrackedChanges,
+    ]);
+    if (liveConflictPaths.size > 0 || liveWorkingPaths.size > 0) {
+      throw new Error('커밋 직전에 작업 파일 상태가 변경되어 중단했습니다.');
+    }
+    await this.requireSafeSubmissionHistory(
+      repository,
+      canonicalMain,
+      'HEAD',
+      week,
+      fileByPath,
+    );
     await repository.commit(normalizedMessage, {
       requireUserConfig: true,
       postCommitCommand: null,
@@ -186,6 +224,7 @@ export class SubmissionActions {
     solutions: readonly SubmissionSolution[],
   ): Promise<void> {
     const repository = await this.requireSubmissionMutation(repositoryRoot, true);
+    const verifiedOrigin = this.requireOrigin(repository);
     const submissionBranch = repository.state.HEAD?.name;
     const branchWeek = weekFromBranch(submissionBranch);
     if (!submissionBranch || !branchWeek) {
@@ -211,8 +250,9 @@ export class SubmissionActions {
 
     const fileByPath = this.fileByPath(repository, solutions);
     const baseRef = remoteBranch ? `origin/${submissionBranch}` : canonicalMain;
+    const rangeBase = await this.requireMergeBase(repository, baseRef, 'HEAD');
     const pendingCommits = await repository.log({
-      range: `${baseRef}..HEAD`,
+      range: `${rangeBase}..HEAD`,
       reverse: true,
       maxEntries: MAX_PUSH_COMMITS + 1,
     });
@@ -260,6 +300,11 @@ export class SubmissionActions {
       submissionBranch,
       true,
     );
+    if (remote.compareIncomplete) {
+      throw new Error(
+        'GitHub 조회 한도로 origin 변경 파일을 모두 확인할 수 없어 자동 push할 수 없습니다.',
+      );
+    }
     if (remote.openPullRequestCount > 1) {
       throw new Error('열린 주차 PR이 여러 개입니다. GitHub에서 하나만 남겨 주세요.');
     }
@@ -292,6 +337,32 @@ export class SubmissionActions {
       );
     }
 
+    const expectedHead = repository.state.HEAD?.commit;
+    const expectedRemoteCommit = remoteBranch?.commit;
+    if (!expectedHead) {
+      throw new Error('push할 HEAD 커밋을 확인할 수 없습니다.');
+    }
+    await repository.fetch({ remote: 'origin', prune: true });
+    await repository.status();
+    this.requireCleanOperationState(repository);
+    this.requireUnchangedOrigin(repository, verifiedOrigin);
+    if (
+      repository.state.HEAD?.name !== submissionBranch
+      || repository.state.HEAD.commit !== expectedHead
+    ) {
+      throw new Error('push 직전에 브랜치 또는 HEAD가 변경되어 중단했습니다.');
+    }
+    const liveRemoteBranch = await this.getBranch(repository, `origin/${submissionBranch}`);
+    if (liveRemoteBranch?.commit !== expectedRemoteCommit) {
+      throw new Error(`push 직전에 origin/${submissionBranch} 상태가 변경되어 중단했습니다.`);
+    }
+    if (liveRemoteBranch) {
+      const liveRelation = await getRefRelation(repository, `origin/${submissionBranch}`);
+      if (liveRelation !== 'ahead') {
+        throw new Error(`push 직전에 ${submissionBranch}의 로컬·원격 관계가 변경되어 중단했습니다.`);
+      }
+    }
+
     await repository.push(
       'origin',
       submissionBranch,
@@ -312,12 +383,13 @@ export class SubmissionActions {
     if (this.hasBlockingDirtyState(repository, solutions)) {
       throw new Error('스테이징 또는 풀이 외 추적 파일 변경을 먼저 정리해 주세요.');
     }
-    await this.performForkSync(repository);
+    await this.performForkSync(repository, this.requireOrigin(repository));
   }
 
   async discardOtherTrackedChanges(
     repositoryRoot: vscode.Uri,
     solutions: readonly SubmissionSolution[],
+    expectedRelativePaths: readonly string[],
   ): Promise<void> {
     const repository = await this.repositoryAdapter.requireRepository(repositoryRoot);
     await repository.status();
@@ -328,8 +400,21 @@ export class SubmissionActions {
     if (otherPaths.length === 0) {
       throw new Error('되돌릴 풀이 외 추적 파일 변경이 없습니다.');
     }
+    const liveRelativePaths = new Set(otherPaths.map((filePath) =>
+      relativeGitPath(repository.rootUri, vscode.Uri.file(filePath))
+    ));
+    if (!setsEqual(liveRelativePaths, new Set(expectedRelativePaths))) {
+      throw new Error(
+        '확인 후 풀이 외 변경 목록이 달라졌습니다. 제출 상태를 새로고침한 뒤 다시 확인해 주세요.',
+      );
+    }
     await repository.revert(otherPaths);
     await repository.status();
+    const remainingTrackedPaths = this.otherTrackedChangePaths(repository, solutions);
+    if (remainingTrackedPaths.length > 0) {
+      await repository.clean(remainingTrackedPaths);
+      await repository.status();
+    }
     const remaining = this.otherTrackedChangePaths(repository, solutions);
     if (remaining.length > 0) {
       throw new Error('풀이 외 추적 파일 변경을 모두 되돌리지 못했습니다.');
@@ -423,6 +508,9 @@ export class SubmissionActions {
     if (identity.status !== 'verified') {
       throw new Error(identity.reason ?? 'DaleStudy 포크를 확인할 수 없습니다.');
     }
+    await repository.status();
+    this.requireCleanOperationState(repository);
+    this.requireUnchangedOrigin(repository, origin);
     return repository;
   }
 
@@ -445,6 +533,32 @@ export class SubmissionActions {
       );
     }
     return origin;
+  }
+
+  private requireUnchangedOrigin(
+    repository: GitRepository,
+    expected: ParsedGitHubRemote,
+  ): void {
+    const current = this.requireOrigin(repository);
+    if (
+      current.owner.toLowerCase() !== expected.owner.toLowerCase()
+      || current.repository.toLowerCase() !== expected.repository.toLowerCase()
+      || current.url !== expected.url
+    ) {
+      throw new Error('Git 작업 중 origin URL이 변경되어 중단했습니다.');
+    }
+  }
+
+  private async requireMergeBase(
+    repository: GitRepository,
+    baseRef: string,
+    headRef: string,
+  ): Promise<string> {
+    const mergeBase = await repository.getMergeBase(headRef, baseRef);
+    if (!mergeBase) {
+      throw new Error(`${baseRef}와 ${headRef}의 공통 기준점을 확인할 수 없습니다.`);
+    }
+    return mergeBase;
   }
 
   private hasBlockingDirtyState(
@@ -492,7 +606,10 @@ export class SubmissionActions {
     }
   }
 
-  private async performForkSync(repository: GitRepository): Promise<string> {
+  private async performForkSync(
+    repository: GitRepository,
+    verifiedOrigin: ParsedGitHubRemote = this.requireOrigin(repository),
+  ): Promise<string> {
     await repository.fetch({ remote: 'origin', ref: 'main', prune: true });
     await repository.status();
     this.requireCleanOperationState(repository);
@@ -514,6 +631,7 @@ export class SubmissionActions {
     this.requireCleanOperationState(repository);
 
     const canonicalMain = `${canonicalRemote}/main`;
+    const canonicalCommit = (await repository.getCommit(canonicalMain)).hash;
     const canonicalRelation = await getRefRelation(repository, canonicalMain);
     if (canonicalRelation === 'behind' || canonicalRelation === 'diverged') {
       await this.mergeOrAbort(repository, canonicalMain);
@@ -522,10 +640,49 @@ export class SubmissionActions {
     if (finalOriginRelation !== 'equal' && finalOriginRelation !== 'ahead') {
       throw new Error('동기화 결과가 origin/main에서 이어지지 않아 push하지 않았습니다.');
     }
+    const expectedHead = repository.state.HEAD?.commit;
+    if (!expectedHead) {
+      throw new Error('동기화된 main의 HEAD를 확인할 수 없습니다.');
+    }
+    await repository.fetch({ remote: 'origin', ref: 'main', prune: true });
+    await repository.fetch({ remote: canonicalRemote, ref: 'main', prune: true });
+    await repository.status();
+    this.requireCleanOperationState(repository);
+    this.requireUnchangedOrigin(repository, verifiedOrigin);
+    if (
+      repository.state.HEAD?.name !== 'main'
+      || repository.state.HEAD.commit !== expectedHead
+    ) {
+      throw new Error('동기화 push 직전에 main 또는 HEAD가 변경되어 중단했습니다.');
+    }
+    if ((await repository.getCommit(canonicalMain)).hash !== canonicalCommit) {
+      throw new Error('동기화 중 공식 main이 변경되었습니다. 다시 동기화해 주세요.');
+    }
+    const liveOriginRelation = await this.originMainRelation(repository);
+    if (liveOriginRelation !== 'equal' && liveOriginRelation !== 'ahead') {
+      throw new Error('동기화 push 직전에 origin/main이 변경되어 중단했습니다.');
+    }
     if (!repository.state.HEAD?.upstream) {
       await repository.setBranchUpstream('main', 'origin/main');
     }
-    await repository.push('origin', 'main', false);
+    try {
+      await repository.push('origin', 'main', false);
+    } catch (error) {
+      await repository.status();
+      let recovery: string;
+      try {
+        const relation = await this.originMainRelation(repository);
+        recovery = relation === 'ahead'
+          ? '로컬 main에는 동기화 결과가 안전하게 남아 있습니다. 네트워크를 확인한 뒤 다시 동기화해 주세요.'
+          : '로컬 main과 origin/main 상태를 확인한 뒤 다시 동기화해 주세요.';
+      } catch {
+        recovery = '로컬 main의 동기화 결과를 보존했습니다. origin/main을 확인한 뒤 다시 시도해 주세요.';
+      }
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`origin/main push에 실패했습니다. ${recovery} (${detail})`, {
+        cause: error,
+      });
+    }
     await repository.status();
     this.githubClient.clearSubmissionCache();
     return canonicalMain;
@@ -641,8 +798,9 @@ export class SubmissionActions {
     expectedWeek: number,
     fileByPath: ReadonlyMap<string, SubmissionSolution>,
   ): Promise<void> {
+    const mergeBase = await this.requireMergeBase(repository, baseRef, headRef);
     const commits = await repository.log({
-      range: `${baseRef}..${headRef}`,
+      range: `${mergeBase}..${headRef}`,
       reverse: true,
       maxEntries: MAX_PUSH_COMMITS + 1,
     });

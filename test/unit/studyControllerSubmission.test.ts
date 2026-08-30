@@ -16,6 +16,10 @@ const gitMocks = vi.hoisted(() => ({
   signInGitHub: vi.fn(async () => true),
 }));
 
+const windowMocks = vi.hoisted(() => ({
+  showWarningMessage: vi.fn(),
+}));
+
 function event(): (listener: (value: unknown) => void) => { dispose(): void } {
   return () => ({ dispose(): void {} });
 }
@@ -58,7 +62,9 @@ async function createController(submission: RepositorySubmissionSnapshot) {
       onDidChangeConfiguration: event(),
       onDidGrantWorkspaceTrust: event(),
     },
-    window: {},
+    window: {
+      showWarningMessage: windowMocks.showWarningMessage,
+    },
   }));
   vi.doMock('../../src/currentProblemSession.js', () => ({
     CurrentProblemSession: class {
@@ -284,6 +290,50 @@ describe('StudyController weekly submission guard', () => {
         expect.objectContaining({ slug: 'three-sum' }),
       ]),
     );
+    controller.dispose();
+  });
+
+  it('confirms the exact non-solution paths before restoring them', async () => {
+    windowMocks.showWarningMessage.mockResolvedValueOnce('변경 되돌리기');
+    const controller = await createController(submission({
+      blockingTrackedFiles: [{
+        relativePath: 'README.md',
+        kind: 'other',
+        state: 'modified',
+      }, {
+        relativePath: 'two-sum/CaseUser.py',
+        kind: 'solution',
+        state: 'modified',
+      }],
+    }));
+
+    await controller.discardOtherTrackedChanges('file:///study');
+
+    expect(windowMocks.showWarningMessage).toHaveBeenCalledWith(
+      '풀이 외 추적 파일 1개의 변경을 되돌립니다.',
+      expect.objectContaining({
+        modal: true,
+        detail: expect.stringContaining('README.md'),
+      }),
+      '변경 되돌리기',
+    );
+    expect(gitMocks.discardOtherTrackedChanges).toHaveBeenCalledOnce();
+    controller.dispose();
+  });
+
+  it('does not restore non-solution changes when confirmation is cancelled', async () => {
+    windowMocks.showWarningMessage.mockResolvedValueOnce(undefined);
+    const controller = await createController(submission({
+      blockingTrackedFiles: [{
+        relativePath: 'README.md',
+        kind: 'other',
+        state: 'modified',
+      }],
+    }));
+
+    await controller.discardOtherTrackedChanges('file:///study');
+
+    expect(gitMocks.discardOtherTrackedChanges).not.toHaveBeenCalled();
     controller.dispose();
   });
 

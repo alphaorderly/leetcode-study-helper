@@ -62,6 +62,16 @@ export interface SubmissionCommitSnapshot {
   pushed: boolean;
   files: SubmissionFileSnapshot[];
   otherFiles: string[];
+  fileInspectionStatus?: 'ready' | 'unavailable';
+  fileInspectionReason?: string;
+}
+
+export interface LocalSubmissionHistorySnapshot {
+  status: 'ready' | 'unavailable';
+  baseRef?: string;
+  mergeBase?: string;
+  usedLocalMainFallback?: boolean;
+  reason?: string;
 }
 
 export interface PullRequestSnapshot {
@@ -112,6 +122,7 @@ export interface RepositorySubmissionSnapshot {
   stagedFiles: SubmissionFileSnapshot[];
   otherStagedFiles: string[];
   pendingCommits: SubmissionCommitSnapshot[];
+  localHistory?: LocalSubmissionHistorySnapshot;
   forkFiles: SubmissionFileSnapshot[];
   otherForkFiles: string[];
   activePullRequest?: PullRequestSnapshot;

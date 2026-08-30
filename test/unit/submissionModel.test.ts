@@ -82,6 +82,7 @@ describe('submission status projection', () => {
       conflictPaths,
       pendingPaths: new Set([pending.relativePath]),
       remote,
+      canonicalMatchingPaths: new Set([merged.relativePath]),
     });
 
     expect(Object.fromEntries(statuses)).toEqual({

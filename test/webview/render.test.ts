@@ -827,6 +827,151 @@ describe('webview rendering', () => {
     ).toBe(false);
   });
 
+  it('keeps local commits visible while GitHub status is unavailable', () => {
+    ui.viewMode = 'submission';
+    const state = submissionSnapshot();
+    const localFile = state.repositories[0]!.submission!.pendingCommits[0]!.files[0]!;
+    const unavailable: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          status: 'unavailable',
+          branch: 'week-01',
+          fork: {
+            ...repository.submission!.fork,
+            status: 'unavailable',
+            reason: 'GitHub 상태를 확인할 수 없습니다.',
+          },
+          stagedFiles: [],
+          forkFiles: [],
+          activePullRequest: undefined,
+          pullRequest: undefined,
+          pendingCommits: [{
+            hash: 'abcdef0123456789',
+            shortHash: 'abcdef0',
+            message: '[CaseUser] WEEK 01 Solutions',
+            pushed: false,
+            files: [localFile],
+            otherFiles: [],
+            fileInspectionStatus: 'ready',
+          }],
+          localHistory: {
+            status: 'ready',
+            baseRef: 'upstream/main',
+            mergeBase: 'official-base',
+          },
+          blockedReason: 'GitHub 상태를 확인할 수 없습니다.',
+        },
+      })),
+    };
+
+    renderApp(root, unavailable, ui, vi.fn());
+
+    expect(root.textContent).toContain('GitHub 상태를 확인할 수 없습니다.');
+    expect(root.textContent).toContain('commit abcdef0 · 풀이 1개');
+    expect(root.textContent).toContain(localFile.relativePath);
+    const push = [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .find(({ textContent }) => textContent === 'origin에 push');
+    expect(push?.disabled).toBe(true);
+  });
+
+  it('shows the current week-11 commit and an enabled origin push action', () => {
+    ui.viewMode = 'submission';
+    const state = submissionSnapshot();
+    const slugs = [
+      'missing-number',
+      'reorder-list',
+      'graph-valid-tree',
+      'merge-intervals',
+      'binary-tree-maximum-path-sum',
+    ];
+    const current: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          status: 'ready',
+          branch: 'week-11',
+          submissionBranch: 'week-11',
+          activeSubmissionWeek: 11,
+          stagedFiles: [],
+          pendingCommits: [{
+            hash: '5e06873500000000',
+            shortHash: '5e06873',
+            message: '[CaseUser] WEEK 11 Solutions',
+            pushed: false,
+            files: slugs.map((slug) => ({
+              name: 'CaseUser.py',
+              uri: `file:///study-a/${slug}/CaseUser.py`,
+              relativePath: `${slug}/CaseUser.py`,
+              slug,
+              week: 11,
+            })),
+            otherFiles: [],
+            fileInspectionStatus: 'ready',
+          }],
+          forkFiles: [],
+          otherForkFiles: [],
+          activePullRequest: undefined,
+          pullRequest: undefined,
+          blockedReason: undefined,
+          summary: {
+            working: 0,
+            staged: 0,
+            pushNeeded: 5,
+            prPending: 0,
+            merged: 0,
+            unknown: 0,
+          },
+        },
+      })),
+    };
+
+    renderApp(root, current, ui, vi.fn());
+
+    expect(root.textContent).toContain('commit 5e06873 · 풀이 5개');
+    const push = [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .find(({ textContent }) => textContent === 'origin에 push');
+    expect(push?.disabled).toBe(false);
+  });
+
+  it('shows a commit when its file inspection failed', () => {
+    ui.viewMode = 'submission';
+    const state = submissionSnapshot();
+    const failed: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          stagedFiles: [],
+          forkFiles: [],
+          activePullRequest: undefined,
+          pullRequest: undefined,
+          pendingCommits: [{
+            hash: 'abcdef0123456789',
+            shortHash: 'abcdef0',
+            message: 'local commit',
+            pushed: false,
+            files: [],
+            otherFiles: [],
+            fileInspectionStatus: 'unavailable',
+            fileInspectionReason: '변경 파일을 확인할 수 없습니다: diff failed',
+          }],
+          blockedReason: '일부 로컬 커밋의 변경 파일을 확인할 수 없어 push할 수 없습니다.',
+        },
+      })),
+    };
+
+    renderApp(root, failed, ui, vi.fn());
+
+    expect(root.textContent).toContain('commit abcdef0 · 풀이 0개');
+    expect(root.textContent).toContain('diff failed');
+  });
+
   it('shows a connect CTA when the official remote is missing', () => {
     const post = vi.fn();
     ui.viewMode = 'submission';
