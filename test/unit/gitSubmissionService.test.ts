@@ -173,7 +173,9 @@ function createRepository() {
       async (): Promise<Array<{ hash: string; message: string; parents: string[] }>> => [],
     ),
     add: vi.fn(async () => {}),
-    revert: vi.fn(async (_paths: string[]) => {}),
+    revert: vi.fn(async (paths: string[]) => {
+      void paths;
+    }),
     commit: vi.fn(async () => {}),
     createBranch: vi.fn(async (name: string, checkout: boolean, ref = 'HEAD') => {
       const commit = ref === 'HEAD'
