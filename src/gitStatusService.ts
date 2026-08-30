@@ -392,16 +392,15 @@ export class GitStatusService implements vscode.Disposable {
       }),
     );
     const mixedWeeks = activeWeeks.size > 1;
-    let hasBlockingOriginCommits: boolean;
-    try {
-      if (branch !== 'main') {
-        throw new Error('not-main');
+    let hasBlockingOriginCommits = false;
+    if (branch === 'main') {
+      try {
+        const originRelation = await getRefRelation(repository, 'origin/main');
+        hasBlockingOriginCommits = originRelation === 'ahead'
+          || originRelation === 'diverged';
+      } catch {
+        hasBlockingOriginCommits = false;
       }
-      const originRelation = await getRefRelation(repository, 'origin/main');
-      hasBlockingOriginCommits = originRelation === 'ahead'
-        || originRelation === 'diverged';
-    } catch {
-      hasBlockingOriginCommits = true;
     }
     const hasDirtyTrackedState = repository.state.indexChanges.length > 0
       || repository.state.workingTreeChanges.length > 0

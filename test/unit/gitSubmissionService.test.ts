@@ -366,7 +366,7 @@ describe('GitStatusService submission actions', () => {
     service.dispose();
   });
 
-  it('does not stage the first solution while main is not synchronized', async () => {
+  it('does not stage the first solution while main is ahead of origin', async () => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
     repository.state.HEAD.commit = 'local-main';
     const service = new GitStatusService();
@@ -381,9 +381,11 @@ describe('GitStatusService submission actions', () => {
         slug: 'two-sum',
         week: 1,
       }],
-    )).rejects.toThrow('포크 동기화');
+    )).rejects.toThrow('origin에 push하지 않은 로컬 커밋');
 
     expect(repository.add).not.toHaveBeenCalled();
+    expect(repository.merge).not.toHaveBeenCalled();
+    expect(repository.push).not.toHaveBeenCalled();
     service.dispose();
   });
 
@@ -417,8 +419,38 @@ describe('GitStatusService submission actions', () => {
     service.dispose();
   });
 
-  it('still requires fork sync when official main is ahead of the fork', async () => {
+  it('synchronizes a clean main before staging when official main is ahead', async () => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.refs.find(({ name }) => name === 'upstream/main')!.commit = 'newer';
+    repository.getMergeBase.mockImplementation(async (_ref1: string, ref2: string) => {
+      if (ref2 === 'upstream/main' || ref2 === 'origin/main') {
+        return 'origin';
+      }
+      return 'origin';
+    });
+    const service = new GitStatusService();
+
+    await service.stageSolution(
+      uri('file:///study') as never,
+      uri('file:///study/two-sum/CaseUser.py') as never,
+      1,
+      [{
+        name: 'CaseUser.py',
+        uri: 'file:///study/two-sum/CaseUser.py',
+        slug: 'two-sum',
+        week: 1,
+      }],
+    );
+
+    expect(repository.merge).toHaveBeenCalledWith('upstream/main');
+    expect(repository.push).toHaveBeenCalledWith('origin', 'main', false);
+    expect(repository.add).toHaveBeenCalledWith(['/study/two-sum/CaseUser.py']);
+    service.dispose();
+  });
+
+  it('does not auto-sync a dirty main when official main is ahead', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.workingTreeChanges = [change('two-sum/CaseUser.py')];
     repository.state.refs.find(({ name }) => name === 'upstream/main')!.commit = 'newer';
     repository.getMergeBase.mockImplementation(async (_ref1: string, ref2: string) => {
       if (ref2 === 'upstream/main' || ref2 === 'origin/main') {
@@ -438,9 +470,11 @@ describe('GitStatusService submission actions', () => {
         slug: 'two-sum',
         week: 1,
       }],
-    )).rejects.toThrow('제출 탭 오른쪽 위 ‘포크 동기화’');
+    )).rejects.toThrow('추적 파일 변경을 정리한 뒤 포크를 동기화');
 
     expect(repository.add).not.toHaveBeenCalled();
+    expect(repository.merge).not.toHaveBeenCalled();
+    expect(repository.push).not.toHaveBeenCalled();
     service.dispose();
   });
 
@@ -1362,6 +1396,34 @@ describe('GitStatusService submission actions', () => {
     service.dispose();
   });
 
+  it('rejects fork sync when origin/main is missing after fetch', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.getCommit.mockImplementation(async (ref: string) => {
+      if (ref === 'origin/main') {
+        throw new Error('missing origin/main');
+      }
+      return {
+        hash: ref === 'HEAD'
+          ? repository.state.HEAD.commit
+          : repository.state.refs.find(({ name }) => name === ref)?.commit ?? ref,
+        message: ref,
+        parents: ['origin'],
+      };
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => githubResponse({
+      fork: true,
+      source: { full_name: 'DaleStudy/leetcode-study' },
+    })));
+    const service = new GitStatusService();
+
+    await expect(service.syncFork(uri('file:///study') as never))
+      .rejects.toThrow('origin/main을 가져오지 못했습니다');
+
+    expect(repository.merge).not.toHaveBeenCalled();
+    expect(repository.push).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
   it('disables canSync when main is ahead of origin without upstream', async () => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
     repository.state.HEAD.upstream = undefined;
@@ -1404,6 +1466,60 @@ describe('GitStatusService submission actions', () => {
     expect(result.submission?.canSync).toBe(false);
     expect(result.submission?.syncDisabledReason)
       .toBe('origin에 push하지 않은 로컬 커밋을 먼저 처리해 주세요.');
+    service.dispose();
+  });
+
+  it('keeps canSync enabled when origin/main cannot be compared', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.getCommit.mockImplementation(async (ref: string) => {
+      if (ref === 'origin/main') {
+        throw new Error('missing origin/main');
+      }
+      return {
+        hash: ref === 'HEAD'
+          ? repository.state.HEAD.commit
+          : repository.state.refs.find(({ name }) => name === ref)?.commit ?? ref,
+        message: ref,
+        parents: ['origin'],
+      };
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const requestUrl = String(input);
+      if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+        return githubResponse({
+          fork: true,
+          source: { full_name: 'DaleStudy/leetcode-study' },
+        });
+      }
+      if (requestUrl.includes('/compare/')) {
+        return githubResponse({
+          ahead_by: 0,
+          behind_by: 0,
+          files: [],
+          commits: [],
+        });
+      }
+      if (requestUrl.includes('/git/trees/main')) {
+        return githubResponse({
+          truncated: false,
+          tree: [],
+        });
+      }
+      return githubResponse([]);
+    }));
+    const service = new GitStatusService();
+    const solutionUri = 'file:///study/two-sum/CaseUser.py';
+
+    const result = await service.getStatuses(
+      uri('file:///study') as never,
+      [solutionUri],
+      true,
+      [{ name: 'CaseUser.py', uri: solutionUri, slug: 'two-sum', week: 1 }],
+      true,
+    );
+
+    expect(result.submission?.canSync).toBe(true);
+    expect(result.submission?.syncDisabledReason).toBeUndefined();
     service.dispose();
   });
 

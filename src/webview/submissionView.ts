@@ -132,6 +132,9 @@ function renderSubmissionGraph(
         'empty-state',
         '공식 DaleStudy 저장소와 맞춰야 주차 제출을 시작할 수 있습니다.',
       ));
+      if (!submission.canSync && submission.syncDisabledReason) {
+        region.append(element('p', 'issue', submission.syncDisabledReason));
+      }
       const button = element('button', 'primary-button', '공식 저장소 연결');
       button.type = 'button';
       button.disabled = ui.busy || !submission.canSync;
@@ -152,6 +155,14 @@ function renderSubmissionGraph(
       '문제 카드에서 풀이를 커밋에 추가하면 이곳에 제출 흐름이 나타납니다.',
     ));
     return graph;
+  }
+
+  if (
+    submission.behindOfficialMain
+    && !submission.canSync
+    && submission.syncDisabledReason
+  ) {
+    graph.append(element('p', 'issue', submission.syncDisabledReason));
   }
 
   const pullRequestStatusLabel = pullRequestSnapshot?.status === 'merged'

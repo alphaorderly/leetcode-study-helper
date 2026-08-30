@@ -888,6 +888,39 @@ describe('webview rendering', () => {
     expect(syncButton?.title).toBe('포크 동기화는 main 브랜치에서만 실행할 수 있습니다.');
   });
 
+  it('shows the sync-disabled reason in the connect empty state', () => {
+    ui.viewMode = 'submission';
+    const state = submissionSnapshot();
+    const behind: ExtensionSnapshot = {
+      ...state,
+      repositories: state.repositories.map((repository) => ({
+        ...repository,
+        submission: {
+          ...repository.submission!,
+          behindOfficialMain: true,
+          canSync: false,
+          syncDisabledReason: '스테이징 또는 추적 파일 변경을 먼저 정리해 주세요.',
+          stagedFiles: [],
+          pendingCommits: [],
+          forkFiles: [],
+          otherForkFiles: [],
+          otherStagedFiles: [],
+          activePullRequest: undefined,
+          pullRequest: undefined,
+        },
+      })),
+    };
+
+    renderApp(root, behind, ui, vi.fn());
+
+    expect(root.textContent).toContain('공식 DaleStudy 저장소와 맞춰야');
+    expect(root.textContent).toContain('스테이징 또는 추적 파일 변경을 먼저 정리해 주세요.');
+    const connectButton = [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .find(({ textContent }) => textContent === '공식 저장소 연결');
+    expect(connectButton?.disabled).toBe(true);
+    expect(connectButton?.title).toBe('스테이징 또는 추적 파일 변경을 먼저 정리해 주세요.');
+  });
+
   it('removes merged files from the submission graph while keeping the card badge', () => {
     const state = submissionSnapshot();
     const merged: ExtensionSnapshot = {

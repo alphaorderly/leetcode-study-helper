@@ -301,50 +301,10 @@ export class SubmissionActions {
     if (repository.state.HEAD?.name !== 'main') {
       throw new Error('포크 동기화는 main 브랜치에서만 실행할 수 있습니다.');
     }
-    if (
-      repository.state.indexChanges.length > 0
-      || repository.state.workingTreeChanges.length > 0
-      || repository.state.mergeChanges.length > 0
-      || repository.state.rebaseCommit
-    ) {
+    if (this.hasDirtyTrackedState(repository)) {
       throw new Error('스테이징 또는 추적 파일 변경을 먼저 정리해 주세요.');
     }
-
-    await repository.fetch({ remote: 'origin', ref: 'main', prune: true });
-    await repository.status();
-    this.requireCleanOperationState(repository);
-
-    const originRelation = await getRefRelation(repository, 'origin/main');
-    if (originRelation === 'ahead') {
-      throw new Error('origin에 push하지 않은 로컬 커밋을 먼저 처리해 주세요.');
-    }
-    if (originRelation === 'diverged') {
-      throw new Error('로컬 main과 origin/main이 서로 분기되어 자동 동기화할 수 없습니다.');
-    }
-    if (originRelation === 'behind') {
-      await this.mergeOrAbort(repository, 'origin/main');
-    }
-
-    const canonicalRemote = await this.ensureCanonicalRemote(repository);
-    await repository.fetch({ remote: canonicalRemote, ref: 'main', prune: true });
-    await repository.status();
-    this.requireCleanOperationState(repository);
-
-    const canonicalMain = `${canonicalRemote}/main`;
-    const canonicalRelation = await getRefRelation(repository, canonicalMain);
-    if (canonicalRelation === 'behind' || canonicalRelation === 'diverged') {
-      await this.mergeOrAbort(repository, canonicalMain);
-    }
-    const finalOriginRelation = await getRefRelation(repository, 'origin/main');
-    if (finalOriginRelation !== 'equal' && finalOriginRelation !== 'ahead') {
-      throw new Error('동기화 결과가 origin/main에서 이어지지 않아 push하지 않았습니다.');
-    }
-    if (!repository.state.HEAD?.upstream) {
-      await repository.setBranchUpstream('main', 'origin/main');
-    }
-    await repository.push('origin', 'main', false);
-    await repository.status();
-    this.githubClient.clearSubmissionCache();
+    await this.performForkSync(repository);
   }
 
   async openPullRequest(
@@ -455,6 +415,60 @@ export class SubmissionActions {
     return origin;
   }
 
+  private hasDirtyTrackedState(repository: GitRepository): boolean {
+    return repository.state.indexChanges.length > 0
+      || repository.state.workingTreeChanges.length > 0
+      || repository.state.mergeChanges.length > 0
+      || Boolean(repository.state.rebaseCommit);
+  }
+
+  private async originMainRelation(repository: GitRepository) {
+    try {
+      return await getRefRelation(repository, 'origin/main');
+    } catch {
+      throw new Error('origin/main을 가져오지 못했습니다.');
+    }
+  }
+
+  private async performForkSync(repository: GitRepository): Promise<string> {
+    await repository.fetch({ remote: 'origin', ref: 'main', prune: true });
+    await repository.status();
+    this.requireCleanOperationState(repository);
+
+    const originRelation = await this.originMainRelation(repository);
+    if (originRelation === 'ahead') {
+      throw new Error('origin에 push하지 않은 로컬 커밋을 먼저 처리해 주세요.');
+    }
+    if (originRelation === 'diverged') {
+      throw new Error('로컬 main과 origin/main이 서로 분기되어 자동 동기화할 수 없습니다.');
+    }
+    if (originRelation === 'behind') {
+      await this.mergeOrAbort(repository, 'origin/main');
+    }
+
+    const canonicalRemote = await this.ensureCanonicalRemote(repository);
+    await repository.fetch({ remote: canonicalRemote, ref: 'main', prune: true });
+    await repository.status();
+    this.requireCleanOperationState(repository);
+
+    const canonicalMain = `${canonicalRemote}/main`;
+    const canonicalRelation = await getRefRelation(repository, canonicalMain);
+    if (canonicalRelation === 'behind' || canonicalRelation === 'diverged') {
+      await this.mergeOrAbort(repository, canonicalMain);
+    }
+    const finalOriginRelation = await this.originMainRelation(repository);
+    if (finalOriginRelation !== 'equal' && finalOriginRelation !== 'ahead') {
+      throw new Error('동기화 결과가 origin/main에서 이어지지 않아 push하지 않았습니다.');
+    }
+    if (!repository.state.HEAD?.upstream) {
+      await repository.setBranchUpstream('main', 'origin/main');
+    }
+    await repository.push('origin', 'main', false);
+    await repository.status();
+    this.githubClient.clearSubmissionCache();
+    return canonicalMain;
+  }
+
   private async requireSynchronizedMain(repository: GitRepository): Promise<string> {
     if (repository.state.HEAD?.name !== 'main') {
       throw new Error('새 주차 브랜치는 main에서만 만들 수 있습니다.');
@@ -465,21 +479,26 @@ export class SubmissionActions {
     await repository.status();
     const canonicalMain = `${remoteName}/main`;
     const [originRelation, canonicalRelation] = await Promise.all([
-      getRefRelation(repository, 'origin/main'),
+      this.originMainRelation(repository),
       getRefRelation(repository, canonicalMain),
     ]);
-    if (originRelation !== 'equal') {
-      throw new Error(
-        'main이 origin/main과 다릅니다. 제출 탭 오른쪽 위 ‘포크 동기화’를 눌러 주세요.',
-      );
+    if (originRelation === 'ahead') {
+      throw new Error('origin에 push하지 않은 로컬 커밋을 먼저 처리해 주세요.');
     }
-    // equal: 동일 SHA. ahead: 공식 main을 이미 포함한 포크(merge 커밋 등).
-    if (canonicalRelation === 'behind' || canonicalRelation === 'diverged') {
-      throw new Error(
-        'main이 공식 저장소보다 뒤처져 있습니다. 제출 탭 오른쪽 위 ‘포크 동기화’를 눌러 주세요.',
-      );
+    if (originRelation === 'diverged') {
+      throw new Error('로컬 main과 origin/main이 서로 분기되어 자동 동기화할 수 없습니다.');
     }
-    return canonicalMain;
+    const needsSync = originRelation === 'behind'
+      || canonicalRelation === 'behind'
+      || canonicalRelation === 'diverged';
+    if (!needsSync) {
+      // equal: 동일 SHA. ahead: 공식 main을 이미 포함한 포크(merge 커밋 등).
+      return canonicalMain;
+    }
+    if (this.hasDirtyTrackedState(repository)) {
+      throw new Error('스테이징 또는 추적 파일 변경을 정리한 뒤 포크를 동기화해 주세요.');
+    }
+    return this.performForkSync(repository);
   }
 
   private async ensureCanonicalRemote(repository: GitRepository): Promise<string> {
