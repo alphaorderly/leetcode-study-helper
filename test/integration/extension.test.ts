@@ -94,17 +94,11 @@ suite('LeetCode Study Helper integration', () => {
   let createdUri: vscode.Uri | undefined;
 
   suiteSetup(async () => {
-    const extension = vscode.extensions.getExtension(
-      'alphaorderly.leetcode-study-helper',
-    );
+    const extension = vscode.extensions.getExtension('alphaorderly.leetcode-study-helper');
     assert.ok(extension, 'Extension should be discoverable in the development host.');
     await extension.activate();
     await configuration.update('nickname', 'CaseUser', vscode.ConfigurationTarget.Global);
-    await configuration.update(
-      'preferredLanguage',
-      'python3',
-      vscode.ConfigurationTarget.Global,
-    );
+    await configuration.update('preferredLanguage', 'python3', vscode.ConfigurationTarget.Global);
   });
 
   suiteTeardown(async () => {
@@ -116,19 +110,16 @@ suite('LeetCode Study Helper integration', () => {
       }
     }
     await configuration.update('nickname', undefined, vscode.ConfigurationTarget.Global);
-    await configuration.update(
-      'preferredLanguage',
-      undefined,
-      vscode.ConfigurationTarget.Global,
-    );
+    await configuration.update('preferredLanguage', undefined, vscode.ConfigurationTarget.Global);
   });
 
   test('detects both workspace roots and matches case-sensitively', async () => {
-    const state = await waitForState((current) =>
-      current.repositories
-        .find(({ name }) => name === 'study-a')
-        ?.problems.find(({ slug }) => slug === 'two-sum')
-        ?.solutions.every(({ gitStatus }) => gitStatus === 'pushed') === true,
+    const state = await waitForState(
+      (current) =>
+        current.repositories
+          .find(({ name }) => name === 'study-a')
+          ?.problems.find(({ slug }) => slug === 'two-sum')
+          ?.solutions.every(({ gitStatus }) => gitStatus === 'pushed') === true,
     );
     assert.equal(state.repositories.length, 2);
 
@@ -137,10 +128,7 @@ suite('LeetCode Study Helper integration', () => {
     const twoSum = studyA?.problems.find(({ slug }) => slug === 'two-sum');
     assert.ok(twoSum);
     assert.equal(twoSum.week, 1);
-    assert.equal(
-      twoSum.solutionUrl,
-      'https://www.algodale.com/problems/two-sum/',
-    );
+    assert.equal(twoSum.solutionUrl, 'https://www.algodale.com/problems/two-sum/');
     assert.equal(twoSum.hasOtherSolutions, true);
     assert.deepEqual(
       twoSum.solutions.map(({ name }) => name),
@@ -157,8 +145,7 @@ suite('LeetCode Study Helper integration', () => {
     assert.equal(
       state.repositories
         .find(({ name }) => name === 'study-b')
-        ?.problems.find(({ slug }) => slug === 'valid-anagram')
-        ?.solutionUrl,
+        ?.problems.find(({ slug }) => slug === 'valid-anagram')?.solutionUrl,
       'https://www.algodale.com/problems/valid-anagram/',
     );
   });
@@ -169,11 +156,7 @@ suite('LeetCode Study Helper integration', () => {
     );
     const studyA = state?.repositories.find(({ name }) => name === 'study-a');
     assert.ok(studyA);
-    const readmeUri = vscode.Uri.joinPath(
-      vscode.Uri.parse(studyA.rootUri),
-      'two-sum',
-      'README.md',
-    );
+    const readmeUri = vscode.Uri.joinPath(vscode.Uri.parse(studyA.rootUri), 'two-sum', 'README.md');
     const original = await vscode.workspace.fs.readFile(readmeUri);
     const changedUrl = 'https://www.algodale.com/problems/two-sum-updated/';
 
@@ -184,26 +167,26 @@ suite('LeetCode Study Helper integration', () => {
           `- 문제: https://leetcode.com/problems/two-sum/\n- 풀이: ${changedUrl}\n`,
         ),
       );
-      const changed = await waitForState((current) =>
-        current.repositories
-          .find(({ name }) => name === 'study-a')
-          ?.problems.find(({ slug }) => slug === 'two-sum')
-          ?.solutionUrl === changedUrl,
+      const changed = await waitForState(
+        (current) =>
+          current.repositories
+            .find(({ name }) => name === 'study-a')
+            ?.problems.find(({ slug }) => slug === 'two-sum')?.solutionUrl === changedUrl,
       );
       assert.equal(
         changed.repositories
           .find(({ name }) => name === 'study-a')
-          ?.problems.find(({ slug }) => slug === 'two-sum')
-          ?.solutionUrl,
+          ?.problems.find(({ slug }) => slug === 'two-sum')?.solutionUrl,
         changedUrl,
       );
     } finally {
       await vscode.workspace.fs.writeFile(readmeUri, original);
-      await waitForState((current) =>
-        current.repositories
-          .find(({ name }) => name === 'study-a')
-          ?.problems.find(({ slug }) => slug === 'two-sum')
-          ?.solutionUrl === 'https://www.algodale.com/problems/two-sum/',
+      await waitForState(
+        (current) =>
+          current.repositories
+            .find(({ name }) => name === 'study-a')
+            ?.problems.find(({ slug }) => slug === 'two-sum')?.solutionUrl ===
+          'https://www.algodale.com/problems/two-sum/',
       );
     }
   });
@@ -271,9 +254,7 @@ suite('LeetCode Study Helper integration', () => {
       'two-sum',
       'caseuser.ts',
     );
-    await vscode.window.showTextDocument(
-      await vscode.workspace.openTextDocument(otherSolutionUri),
-    );
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(otherSolutionUri));
     const activeOtherSolution = await vscode.commands.executeCommand<ExtensionSnapshot>(
       'leetcodeStudyHelper.__getState',
     );
@@ -317,17 +298,15 @@ suite('LeetCode Study Helper integration', () => {
       );
       assert.equal(await vscode.workspace.applyEdit(edit), true);
 
-      const ready = await waitForState((current) =>
-        current.currentProblem?.solution.uri === solution.uri
-        && current.currentProblem.runner.status === 'ready'
-        && current.currentProblem.runner.candidates?.length === 2,
+      const ready = await waitForState(
+        (current) =>
+          current.currentProblem?.solution.uri === solution.uri &&
+          current.currentProblem.runner.status === 'ready' &&
+          current.currentProblem.runner.candidates?.length === 2,
       );
       const candidateId = ready.currentProblem?.runner.candidates?.[0]?.id;
       assert.ok(candidateId);
-      await vscode.commands.executeCommand(
-        'leetcodeStudyHelper.__runCurrentSolution',
-        candidateId,
-      );
+      await vscode.commands.executeCommand('leetcodeStudyHelper.__runCurrentSolution', candidateId);
       const result = await vscode.commands.executeCommand<ExtensionSnapshot>(
         'leetcodeStudyHelper.__getState',
       );
@@ -356,18 +335,25 @@ suite('LeetCode Study Helper integration', () => {
     createdUri = createdFileUri;
     assert.equal((await vscode.workspace.fs.readFile(createdFileUri)).byteLength, 0);
 
-    const after = await waitForState((current) =>
-      current.repositories
-        .find(({ name }) => name === 'study-a')
-        ?.problems.find(({ slug }) => slug === 'three-sum')
-        ?.solutions.some(({ gitStatus }) => gitStatus === 'unpushed') === true,
+    const after = await waitForState(
+      (current) =>
+        current.repositories
+          .find(({ name }) => name === 'study-a')
+          ?.problems.find(({ slug }) => slug === 'three-sum')
+          ?.solutions.some(({ gitStatus }) => gitStatus === 'unpushed') === true,
     );
     const problem = after?.repositories
       .find(({ name }) => name === 'study-a')
       ?.problems.find(({ slug }) => slug === 'three-sum');
     assert.equal(problem?.completed, true);
-    assert.deepEqual(problem?.solutions.map(({ name }) => name), ['CaseUser.py']);
-    assert.deepEqual(problem?.solutions.map(({ gitStatus }) => gitStatus), ['unpushed']);
+    assert.deepEqual(
+      problem?.solutions.map(({ name }) => name),
+      ['CaseUser.py'],
+    );
+    assert.deepEqual(
+      problem?.solutions.map(({ gitStatus }) => gitStatus),
+      ['unpushed'],
+    );
 
     const repositoryPath = vscode.Uri.parse(studyA.rootUri).fsPath;
     await execFileAsync('git', ['add', 'three-sum/CaseUser.py'], { cwd: repositoryPath });
@@ -380,23 +366,21 @@ suite('LeetCode Study Helper integration', () => {
     assert.equal(
       committed?.repositories
         .find(({ name }) => name === 'study-a')
-        ?.problems.find(({ slug }) => slug === 'three-sum')
-        ?.solutions[0]?.gitStatus,
+        ?.problems.find(({ slug }) => slug === 'three-sum')?.solutions[0]?.gitStatus,
       'unpushed',
     );
 
     await execFileAsync('git', ['push', 'origin', 'main'], { cwd: repositoryPath });
-    const pushed = await waitForState((current) =>
-      current.repositories
-        .find(({ name }) => name === 'study-a')
-        ?.problems.find(({ slug }) => slug === 'three-sum')
-        ?.solutions[0]?.gitStatus === 'pushed',
+    const pushed = await waitForState(
+      (current) =>
+        current.repositories
+          .find(({ name }) => name === 'study-a')
+          ?.problems.find(({ slug }) => slug === 'three-sum')?.solutions[0]?.gitStatus === 'pushed',
     );
     assert.equal(
       pushed.repositories
         .find(({ name }) => name === 'study-a')
-        ?.problems.find(({ slug }) => slug === 'three-sum')
-        ?.solutions[0]?.gitStatus,
+        ?.problems.find(({ slug }) => slug === 'three-sum')?.solutions[0]?.gitStatus,
       'pushed',
     );
 
@@ -443,12 +427,12 @@ suite('LeetCode Study Helper integration', () => {
       await vscode.commands.executeCommand('leetcodeStudyHelper.refresh');
       const current = await waitForState((state) => {
         const repository = state.repositories.find(({ name }) => name === 'study-a');
-        return repository?.submission?.branch === 'week-11'
-          && repository.submission.pendingCommits[0]?.files.length === 5;
+        return (
+          repository?.submission?.branch === 'week-11' &&
+          repository.submission.pendingCommits[0]?.files.length === 5
+        );
       });
-      const submission = current.repositories
-        .find(({ name }) => name === 'study-a')
-        ?.submission;
+      const submission = current.repositories.find(({ name }) => name === 'study-a')?.submission;
 
       assert.equal(submission?.activeSubmissionWeek, 11);
       assert.equal(submission?.pendingCommits.length, 1);
@@ -473,10 +457,9 @@ suite('LeetCode Study Helper integration', () => {
       await execFileAsync('git', ['switch', 'main'], { cwd: repositoryPath });
       for (const relativePath of deletedPaths) {
         try {
-          await vscode.workspace.fs.delete(vscode.Uri.joinPath(
-            vscode.Uri.parse(studyA.rootUri),
-            ...relativePath.split('/'),
-          ));
+          await vscode.workspace.fs.delete(
+            vscode.Uri.joinPath(vscode.Uri.parse(studyA.rootUri), ...relativePath.split('/')),
+          );
         } catch {
           // The deletion may already have survived the branch round trip.
         }
@@ -484,13 +467,15 @@ suite('LeetCode Study Helper integration', () => {
       await vscode.commands.executeCommand('leetcodeStudyHelper.refresh');
       await waitForState((state) => {
         const repository = state.repositories.find(({ name }) => name === 'study-a');
-        return repository?.submission?.branch === 'main'
-          && repository.problems
+        return (
+          repository?.submission?.branch === 'main' &&
+          repository.problems
             .filter(({ week }) => week === 11)
-            .every(({ solutions }) => solutions.length === 0)
-          && repository.problems
+            .every(({ solutions }) => solutions.length === 0) &&
+          repository.problems
             .filter(({ slug }) => deletedPaths.some((path) => path.startsWith(`${slug}/`)))
-            .every(({ solutions }) => solutions.length === 0);
+            .every(({ solutions }) => solutions.length === 0)
+        );
       });
     }
   });
@@ -506,10 +491,7 @@ suite('LeetCode Study Helper integration', () => {
     assert.ok(python);
     assert.ok(markdown);
 
-    await vscode.workspace.fs.writeFile(
-      vscode.Uri.parse(python.uri),
-      Buffer.from('answer\n \t'),
-    );
+    await vscode.workspace.fs.writeFile(vscode.Uri.parse(python.uri), Buffer.from('answer\n \t'));
     await vscode.workspace.fs.writeFile(vscode.Uri.parse(markdown.uri), Buffer.from('ignored'));
 
     const result = await vscode.commands.executeCommand<LineLintFixResult>(

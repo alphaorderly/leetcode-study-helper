@@ -1,3 +1,4 @@
+/** 데이터셋 원본을 읽어 확장에 포함할 Python 테스트 데이터를 갱신합니다. */
 import { createInterface } from 'node:readline';
 import { Readable } from 'node:stream';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -18,12 +19,14 @@ const EXPECTED_MISSING = [
 ];
 const ENTRY_POINT_PATTERN = /^Solution\(\)\.([A-Za-z_]\w*)$/;
 
+/** 주차별 문제 Markdown 표에서 코드로 표시된 문제 slug를 추출합니다. */
 function currentSlugs(markdown) {
   return [...markdown.matchAll(/\|[^\n]*\| `([a-z0-9-]+)` \|/g)]
     .map((match) => match[1])
     .filter((slug) => slug !== undefined);
 }
 
+/** 테스트가 노드 생성 도우미를 사용하면 풀이에 필요한 노드 타입을 반환합니다. */
 function requiredObjects(test) {
   const objects = [];
   if (/\blist_node\s*\(/.test(test)) {
@@ -35,6 +38,7 @@ function requiredObjects(test) {
   return objects;
 }
 
+/** 원본 JSONL을 내려받아 대상 문제를 누적하며 중복·행 형식·엔트리포인트 오류는 거부합니다. */
 async function scanSplit(filename, wanted, found) {
   const response = await globalThis.fetch(`${BASE_URL}/${filename}`);
   if (!response.ok || !response.body) {
@@ -59,9 +63,8 @@ async function scanSplit(filename, wanted, found) {
     if (!Number.isInteger(row.question_id) || typeof row.test !== 'string') {
       throw new Error(`데이터셋 행 형식이 올바르지 않습니다: ${row.task_id}`);
     }
-    const entryPointMatch = typeof row.entry_point === 'string'
-      ? ENTRY_POINT_PATTERN.exec(row.entry_point)
-      : null;
+    const entryPointMatch =
+      typeof row.entry_point === 'string' ? ENTRY_POINT_PATTERN.exec(row.entry_point) : null;
     if (!entryPointMatch) {
       throw new Error(`지원하지 않는 엔트리포인트입니다: ${row.task_id}`);
     }

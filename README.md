@@ -130,6 +130,8 @@ yarn compile
 주요 검증 명령은 다음과 같습니다.
 
 ```sh
+yarn format:check
+yarn docs:check
 yarn lint
 yarn typecheck
 yarn test:unit
@@ -138,6 +140,87 @@ yarn test
 ```
 
 통합 테스트는 `.tmp`에 격리된 멀티 루트 워크스페이스를 만든 뒤 `@vscode/test-electron`으로 실행합니다.
+
+### 코드 편집 규칙
+
+`yarn format`으로 소스·테스트·개발 스크립트·웹뷰 CSS와 개발 설정을 정렬합니다.
+Prettier는 100자 줄 길이, 공백 2칸, 작은따옴표, 세미콜론, 후행 쉼표와 LF를 사용합니다.
+100자는 줄바꿈 기준이며 긴 문자열을 강제로 분할하지는 않습니다.
+VS Code에서 권장 확장인 **Prettier - Code formatter**를 설치하면 지원 언어는 저장할 때 정렬됩니다.
+`yarn test`는 포맷 검사부터 실행합니다.
+
+데이터셋, 테스트용 풀이 원본과 생성 파일은 자동 포맷에서 제외합니다.
+Python 실행기는 별도 포매터 없이 4칸 들여쓰기를 유지합니다.
+`src/**/*.ts`와 `scripts/**/*.mjs`의 클래스·함수·타입·인터페이스, 생성자·메서드·접근자와
+함수를 담은 변수에는 한국어 JSDoc을 작성합니다. 공개 여부와 관계없이 적용하며,
+TypeScript 타입을 반복하기보다 전제조건, 부수 효과, 실패·취소 시 동작을 설명합니다.
+일반 데이터 필드·상수와 익명 콜백은 각 선언의 설명이나 주변 구현으로 맥락을 전달합니다.
+Python에서는 docstring을 사용합니다.
+
+`yarn docs:check`는 TypeScript 구문 트리를 읽어 설명이 없는 선언의 파일·줄·이름을 보고합니다.
+빈 주석이나 태그만 있는 주석도 실패로 처리하며 `yarn test`에 포함됩니다.
+이 검사는 주석 누락을 방지하므로, 설명이 실제 동작과 일치하는지는 코드 리뷰에서 확인합니다.
+
+### 폴더 구조
+
+```text
+src/
+├── extension.ts                # 확장 활성화와 명령 등록 진입점
+├── application/
+│   ├── studyController.ts      # 설정과 사용자 명령 조율
+│   └── sessions/              # 현재 문제 선택·실행, 저장소 갱신 수명 관리
+├── domain/
+│   ├── problems/              # 카탈로그 해석과 정답 링크 규칙
+│   ├── solutions/             # 닉네임·언어·풀이 선택·줄 끝 보정 규칙
+│   └── study/                 # 스터디 주차와 공식 문제 이슈 매핑
+├── infrastructure/
+│   ├── git/
+│   │   ├── gitStatusService.ts # Git 상태 조회와 제출 작업 연결
+│   │   ├── vscodeGit.ts       # 내장 Git 확장 API와 저장소 이벤트
+│   │   ├── refRelation.ts     # HEAD와 ref의 관계 조회
+│   │   └── submission/        # 제출 검증·브랜치 작업·이력 조회·상태 조립
+│   ├── github/                # 인증, GitHub API와 PR 작성 링크
+│   ├── leetcode/              # 문제 API와 포함된 테스트 데이터 읽기
+│   ├── python/                # Python 프로세스 실행과 취소
+│   └── workspace/             # 저장소 탐색과 풀이 파일 입출력
+├── shared/
+│   ├── contracts.ts           # 확장과 웹뷰가 공유하는 스냅샷·메시지 계약
+│   └── async/                 # 버전 캐시와 지연 작업 도구
+└── webview/
+    ├── host/                  # VS Code 웹뷰 제공자와 메시지 중계
+    ├── views/                 # 문제 목록·현재 문제·제출 화면
+    ├── components/            # DOM 도구·아이콘·제출 그래프
+    ├── state/                 # UI 상태 타입과 표시 조건 계산
+    ├── main.ts                # 브라우저 메시지 수신과 UI 상태 복원
+    └── render.ts              # 화면 영역 구성과 부분 갱신
+```
+
+단위 테스트는 `test/unit/` 아래에 소스의 영역별 경로를 따릅니다.
+웹뷰 동작 테스트는 `test/webview/`, VS Code 통합 테스트는 `test/integration/`,
+테스트용 저장소 원본은 `test/fixtures/`에 둡니다.
+개발·검사 스크립트는 `scripts/`, 확장에 포함하는 데이터·Python 실행기는 `resources/`,
+스타일·이미지는 `media/`에 둡니다.
+
+도메인 규칙과 공통 계약은 VS Code·Node·DOM API 없이 사용합니다.
+실행 흐름은 `application/`, 외부 시스템과 파일 접근은 `infrastructure/`에 추가합니다.
+`webview/host/`는 확장 호스트에서, 나머지 웹뷰 코드는 브라우저에서 실행합니다.
+
+### 주요 모듈 책임
+
+| 영역 | 책임 |
+| --- | --- |
+| `StudyController` | 설정·사용자 명령 처리와 저장소·현재 문제 세션 연결 |
+| `RepositoryRefreshSession`, `CurrentProblemSession` | 파일 감시와 갱신 요청 조율, 문제 로딩·Python 분석·실행 취소 |
+| `GitStatusService`, `SubmissionStatusReader` | Git 이벤트·인증 관리와 로컬·원격 제출 정보 조회 |
+| `SubmissionHistory`, `submissionSnapshot` | 커밋 이력 읽기와 입출력 없는 표시 상태 조립 |
+| `SubmissionActions` | 제출 작업의 검증·실행 순서 |
+| `SubmissionGuards`, `SubmissionBranches` | 저장소·이력 검증과 공식 main 동기화·주차 브랜치 전환 |
+| `problemViewModel`, `submissionGraph` | 문제 목록의 표시 조건과 제출 단계별 DOM 생성 |
+
+웹뷰 메시지와 스냅샷 계약은 `src/shared/contracts.ts`에 있습니다.
+화면의 제출 가능 여부는 표시용 정보입니다. Git 쓰기는 네트워크 조회·브랜치 전환 후에도
+실제 상태, index, HEAD와 origin을 다시 확인해야 합니다. 시점이 다른 검증을 중복으로 보고
+합치지 않습니다. 현재 문제의 부분 갱신은 관련 없는 목록과 제출 입력 DOM을 교체하지 않습니다.
 
 ## VSIX 만들기
 

@@ -1,31 +1,37 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ExtensionSnapshot } from '../../src/core/types';
+import type { ExtensionSnapshot } from '../../src/shared/contracts';
 
 const baseSnapshot: ExtensionSnapshot = {
   nickname: 'CaseUser',
   preferredLanguage: 'python3',
   languages: [{ id: 'python3', label: 'Python 3', extension: 'py' }],
-  repositories: [{
-    name: 'study-a',
-    rootUri: 'file:///study-a',
-    problems: [{
-      slug: 'two-sum',
-      week: 1,
-      difficulty: 'Easy',
-      categories: [],
-      blindCategories: [],
-      solutionUrl: 'https://www.algodale.com/problems/two-sum/',
-      completed: true,
-      hasOtherSolutions: true,
-      solutions: [{
-        name: 'CaseUser.py',
-        uri: 'file:///study-a/two-sum/CaseUser.py',
-        gitStatus: 'pushed',
-      }],
-    }],
-  }],
+  repositories: [
+    {
+      name: 'study-a',
+      rootUri: 'file:///study-a',
+      problems: [
+        {
+          slug: 'two-sum',
+          week: 1,
+          difficulty: 'Easy',
+          categories: [],
+          blindCategories: [],
+          solutionUrl: 'https://www.algodale.com/problems/two-sum/',
+          completed: true,
+          hasOtherSolutions: true,
+          solutions: [
+            {
+              name: 'CaseUser.py',
+              uri: 'file:///study-a/two-sum/CaseUser.py',
+              gitStatus: 'pushed',
+            },
+          ],
+        },
+      ],
+    },
+  ],
   issues: [],
   workspaceTrusted: true,
 };
@@ -58,15 +64,19 @@ describe('webview state rendering', () => {
     }));
 
     await import('../../src/webview/main.js');
-    window.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'state', state: baseSnapshot },
-    }));
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'state', state: baseSnapshot },
+      }),
+    );
     const search = document.querySelector('#problem-search');
     const problemCard = document.querySelector('.problem-card');
 
-    window.dispatchEvent(new MessageEvent('message', {
-      data: { type: 'currentProblem', currentProblem },
-    }));
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'currentProblem', currentProblem },
+      }),
+    );
 
     expect(document.querySelector('#problem-search')).toBe(search);
     expect(document.querySelector('.problem-card')).toBe(problemCard);

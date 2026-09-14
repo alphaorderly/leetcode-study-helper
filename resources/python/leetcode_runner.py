@@ -12,6 +12,7 @@ MAX_CAPTURE_CHARS = 1_000_000
 
 
 class LimitedWriter(io.TextIOBase):
+    """실행 중 출력의 보관 크기를 제한하고 잘린 출력에 안내를 붙입니다."""
     def __init__(self, limit):
         self.limit = limit
         self.parts = []
@@ -35,6 +36,7 @@ class LimitedWriter(io.TextIOBase):
 
 
 def parse_entry_point(value):
+    """Solution().메서드 형식의 진입점을 검증하고 메서드 이름을 반환합니다."""
     prefix = "Solution()."
     if not isinstance(value, str) or not value.startswith(prefix):
         raise ValueError("지원하지 않는 Python 엔트리포인트입니다.")
@@ -74,6 +76,7 @@ def defined_names(tree):
 
 
 def inspect_source(source, filename, entry_point, required_objects):
+    """소스를 실행하지 않고 AST에서 풀이 후보와 누락된 객체 선언을 찾습니다."""
     method_name = parse_entry_point(entry_point)
     try:
         tree = ast.parse(source, filename=filename)
@@ -105,7 +108,10 @@ def inspect_source(source, filename, entry_point, required_objects):
             continue
         method_index = 0
         for item in node.body:
-            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == method_name:
+            if (
+                isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and item.name == method_name
+            ):
                 candidate_id = "c{}m{}".format(class_index, method_index)
                 candidates.append({
                     "id": candidate_id,
@@ -139,7 +145,10 @@ def append_capture(node, candidate_id, method_name):
             ),
             args=[
                 ast.Tuple(
-                    elts=[ast.Constant(value=candidate_id), ast.Name(id=method_name, ctx=ast.Load())],
+                    elts=[
+                        ast.Constant(value=candidate_id),
+                        ast.Name(id=method_name, ctx=ast.Load()),
+                    ],
                     ctx=ast.Load(),
                 )
             ],
@@ -149,6 +158,7 @@ def append_capture(node, candidate_id, method_name):
 
 
 def instrument_solutions(tree, method_name):
+    """같은 이름으로 덮어쓴 Solution 클래스와 메서드도 선택할 수 있도록 AST에 보관 코드를 넣습니다."""
     body = []
     class_index = 0
     for node in tree.body:
@@ -172,8 +182,15 @@ def instrument_solutions(tree, method_name):
         method_index = 0
         for item in node.body:
             next_body.append(item)
-            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == method_name:
-                next_body.append(append_capture(node, "c{}m{}".format(class_index, method_index), method_name))
+            if (
+                isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and item.name == method_name
+            ):
+                next_body.append(
+                    append_capture(
+                        node, "c{}m{}".format(class_index, method_index), method_name
+                    )
+                )
                 method_index += 1
         node.body = next_body
         body.append(node)
@@ -209,6 +226,7 @@ def instrument_solutions(tree, method_name):
 
 
 class AssertInstrumenter(ast.NodeTransformer):
+    """assert 실행 직전에 번호를 기록하여 실패한 테스트 위치를 결과에 포함합니다."""
     def __init__(self, source):
         self.source = source
         self.assertions = []
@@ -231,6 +249,7 @@ class AssertInstrumenter(ast.NodeTransformer):
 
 
 def install_prelude(namespace):
+    """LeetCode에서 흔히 제공하는 표준 라이브러리 이름을 실행 공간에 준비합니다."""
     prelude = """
 import array
 import bisect
@@ -259,6 +278,7 @@ inf = float('inf')
 
 
 def install_object_helpers(namespace):
+    """풀이가 선언한 LeetCode 객체를 데이터셋에서 사용할 수 있도록 변환 함수를 준비합니다."""
     def list_node(values):
         if not values:
             return None
@@ -326,6 +346,7 @@ def install_object_helpers(namespace):
 
 
 def run(request, tree, inspection):
+    """선택한 풀이와 테스트를 실행하고 통과 수, 첫 실패와 제한된 출력을 반환합니다."""
     candidate_id = request.get("candidateId")
     candidate_info = next(
         (candidate for candidate in inspection["candidates"] if candidate["id"] == candidate_id),
@@ -365,11 +386,18 @@ def run(request, tree, inspection):
             install_object_helpers(namespace)
 
             test_source = request["test"]
-            test_tree = ast.parse(test_source, filename="dataset:{}".format(request.get("slug", "problem")))
+            test_tree = ast.parse(
+                test_source, filename="dataset:{}".format(request.get("slug", "problem"))
+            )
             instrumenter = AssertInstrumenter(test_source)
             test_tree = instrumenter.visit(test_tree)
             ast.fix_missing_locations(test_tree)
-            exec(compile(test_tree, "dataset:{}".format(request.get("slug", "problem")), "exec"), namespace)
+            exec(
+                compile(
+                    test_tree, "dataset:{}".format(request.get("slug", "problem")), "exec"
+                ),
+                namespace,
+            )
             check = namespace.get("check")
             if not callable(check):
                 raise RuntimeError("데이터셋에 check(candidate) 함수가 없습니다.")
@@ -411,6 +439,7 @@ def run(request, tree, inspection):
 
 
 def main():
+    """stdin의 JSON 요청 하나를 처리하고 stdout에 JSON 응답 하나를 기록합니다."""
     try:
         request = json.load(sys.stdin)
         tree, inspection = inspect_source(

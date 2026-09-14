@@ -18,3 +18,5 @@ node_modules/**
 tsconfig*.json
 eslint.config.mjs
 esbuild.mjs
+.prettierrc.json
+.prettierignore

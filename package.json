@@ -156,14 +156,17 @@
     "package": "yarn typecheck && node esbuild.mjs --production",
     "vscode:prepublish": "yarn package",
     "lint": "eslint .",
+    "docs:check": "node scripts/check-jsdoc.mjs",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run test/unit test/webview",
     "test:compile:integration": "tsc -p tsconfig.integration.json",
     "test:prepare:integration": "node scripts/prepare-integration-fixture.mjs",
     "test:integration": "yarn package && yarn test:compile:integration && yarn test:prepare:integration && node scripts/run-vscode-test.mjs",
-    "test": "yarn lint && yarn typecheck && yarn test:unit && yarn test:integration",
+    "test": "yarn format:check && yarn docs:check && yarn lint && yarn typecheck && yarn test:unit && yarn test:integration",
     "dataset:sync": "node scripts/sync-leetcode-dataset.mjs",
-    "package:vsix": "yarn test && vsce package --allow-missing-repository --out .artifacts/leetcode-study-helper.vsix"
+    "package:vsix": "yarn test && vsce package --allow-missing-repository --out .artifacts/leetcode-study-helper.vsix",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/*.mjs\" \"*.mjs\" \"media/*.css\" \"*.json\" \".prettierrc.json\" \".vscode/*.json\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/*.mjs\" \"*.mjs\" \"media/*.css\" \"*.json\" \".prettierrc.json\" \".vscode/*.json\""
   },
   "devDependencies": {
     "@eslint/js": "latest",
@@ -178,6 +181,7 @@
     "esbuild": "latest",
     "eslint": "latest",
     "jsdom": "latest",
+    "prettier": "3.9.6",
     "typescript": "6.0.3",
     "typescript-eslint": "latest",
     "vitest": "latest"

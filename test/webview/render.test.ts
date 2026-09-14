@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ExtensionSnapshot } from '../../src/core/types';
+import type { ExtensionSnapshot } from '../../src/shared/contracts';
 import { renderApp, WebviewRenderer, type UiState } from '../../src/webview/render';
 
 const snapshot: ExtensionSnapshot = {
@@ -102,69 +102,76 @@ function submissionSnapshot(): ExtensionSnapshot {
   };
   return {
     ...snapshot,
-    repositories: [{
-      ...repository,
-      submission: {
-        status: 'ready',
-        branch: 'main',
-        submissionBranch: 'week-01',
-        activeSubmissionWeek: 1,
-        fork: {
-          status: 'verified',
-          owner: 'CaseUser',
-          repository: 'leetcode-study',
-          originUrl: 'https://github.com/CaseUser/leetcode-study.git',
+    repositories: [
+      {
+        ...repository,
+        submission: {
+          status: 'ready',
+          branch: 'main',
+          submissionBranch: 'week-01',
+          activeSubmissionWeek: 1,
+          fork: {
+            status: 'verified',
+            owner: 'CaseUser',
+            repository: 'leetcode-study',
+            originUrl: 'https://github.com/CaseUser/leetcode-study.git',
+          },
+          stagedFiles: [stagedFile],
+          otherStagedFiles: [],
+          pendingCommits: [
+            {
+              hash: '1234567890abcdef',
+              shortHash: '1234567',
+              message: '[CaseUser] WEEK 01 Solutions',
+              pushed: true,
+              files: [pushedFile],
+              otherFiles: [],
+            },
+          ],
+          forkFiles: [pushedFile],
+          otherForkFiles: [],
+          activePullRequest: {
+            number: 77,
+            title: '[CaseUser] WEEK 01 Solutions',
+            url: 'https://github.com/DaleStudy/leetcode-study/pull/77',
+            week: 1,
+            branch: 'week-01',
+            status: 'open',
+          },
+          pullRequest: {
+            number: 77,
+            title: '[CaseUser] WEEK 01 Solutions',
+            url: 'https://github.com/DaleStudy/leetcode-study/pull/77',
+            week: 1,
+            branch: 'week-01',
+            status: 'open',
+          },
+          summary: {
+            working: 0,
+            staged: 1,
+            pushNeeded: 0,
+            prPending: 1,
+            merged: 0,
+            unknown: 0,
+          },
+          canSync: false,
+          canReturnToMain: false,
+          hasCanonicalRemote: true,
+          behindOfficialMain: false,
+          blockingTrackedFiles: [],
         },
-        stagedFiles: [stagedFile],
-        otherStagedFiles: [],
-        pendingCommits: [{
-          hash: '1234567890abcdef',
-          shortHash: '1234567',
-          message: '[CaseUser] WEEK 01 Solutions',
-          pushed: true,
-          files: [pushedFile],
-          otherFiles: [],
-        }],
-        forkFiles: [pushedFile],
-        otherForkFiles: [],
-        activePullRequest: {
-          number: 77,
-          title: '[CaseUser] WEEK 01 Solutions',
-          url: 'https://github.com/DaleStudy/leetcode-study/pull/77',
-          week: 1,
-          branch: 'week-01',
-          status: 'open',
-        },
-        pullRequest: {
-          number: 77,
-          title: '[CaseUser] WEEK 01 Solutions',
-          url: 'https://github.com/DaleStudy/leetcode-study/pull/77',
-          week: 1,
-          branch: 'week-01',
-          status: 'open',
-        },
-        summary: {
-          working: 0,
-          staged: 1,
-          pushNeeded: 0,
-          prPending: 1,
-          merged: 0,
-          unknown: 0,
-        },
-        canSync: false,
-        canReturnToMain: false,
-        hasCanonicalRemote: true,
-        behindOfficialMain: false,
-        blockingTrackedFiles: [],
-      },
-      problems: [{
-        ...problem,
-        solutions: [
-          { ...typescript, submissionStatus: 'staged' },
-          { ...python, submissionStatus: 'pr-open', pullRequestNumber: 77 },
+        problems: [
+          {
+            ...problem,
+            solutions: [
+              { ...typescript, submissionStatus: 'staged' },
+              { ...python, submissionStatus: 'pr-open', pullRequestNumber: 77 },
+            ],
+          },
+          repository.problems[1]!,
         ],
-      }, repository.problems[1]!],
-    }],
+      },
+    ],
   };
 }
 
@@ -206,9 +213,7 @@ describe('webview rendering', () => {
     expect(root.textContent).not.toContain('CaseUser.py');
     expect(root.textContent).toContain('origin');
     expect(root.textContent).not.toContain('CaseUser.ts');
-    const solutionButtons = [
-      ...root.querySelectorAll<HTMLButtonElement>('.solution-button'),
-    ];
+    const solutionButtons = [...root.querySelectorAll<HTMLButtonElement>('.solution-button')];
     expect(solutionButtons.map(({ textContent }) => textContent)).toEqual(['.py', '.ts']);
     expect(solutionButtons[0]?.title).toBe('CaseUser.py 열기');
     expect(solutionButtons[0]?.getAttribute('aria-current')).toBe('true');
@@ -216,62 +221,77 @@ describe('webview rendering', () => {
     expect(solutionButtons[1]?.hasAttribute('aria-current')).toBe(false);
     expect(root.querySelector('.solution-file-label')?.textContent).toBe('다른 언어 풀이');
     expect(root.querySelector('.solution-file-buttons')?.getAttribute('role')).toBe('group');
-    expect(root.querySelector('.solution-file-buttons')?.getAttribute('aria-label'))
-      .toBe('Two Sum 풀이 파일');
+    expect(root.querySelector('.solution-file-buttons')?.getAttribute('aria-label')).toBe(
+      'Two Sum 풀이 파일',
+    );
     expect(root.querySelectorAll('.solution-status.has-file')).toHaveLength(1);
     expect(root.querySelectorAll('.solution-status.no-file')).toHaveLength(1);
     expect(root.querySelector('.solution-git-status.pushed')).not.toBeNull();
     expect(root.querySelectorAll('.problem-card-action')).toHaveLength(2);
     expect(root.querySelectorAll('.other-solution-button')).toHaveLength(2);
-    expect((root.querySelector(
-      '.problem-card.completed .other-solution-button',
-    ) as HTMLButtonElement).disabled).toBe(false);
-    expect((root.querySelector(
-      '.problem-card.incomplete .other-solution-button',
-    ) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (root.querySelector('.problem-card.completed .other-solution-button') as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(
+      (root.querySelector('.problem-card.incomplete .other-solution-button') as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     expect(root.querySelectorAll('.other-solution-button .users-round-icon')).toHaveLength(2);
     expect(root.querySelector('.other-solution-button')?.textContent).toBe('');
-    expect(root.querySelector('.other-solution-button')?.getAttribute('aria-label'))
-      .toBe('Two Sum 다른 참여자의 풀이 열기');
-    expect((root.querySelector('.other-solution-button') as HTMLButtonElement).dataset.tooltip)
-      .toBe('다른 참여자의 풀이 열기');
+    expect(root.querySelector('.other-solution-button')?.getAttribute('aria-label')).toBe(
+      'Two Sum 다른 참여자의 풀이 열기',
+    );
+    expect(
+      (root.querySelector('.other-solution-button') as HTMLButtonElement).dataset.tooltip,
+    ).toBe('다른 참여자의 풀이 열기');
     expect(root.querySelectorAll('.answer-button')).toHaveLength(2);
-    expect([...root.querySelectorAll<HTMLButtonElement>('.answer-button')]
-      .every(({ disabled }) => !disabled)).toBe(true);
+    expect(
+      [...root.querySelectorAll<HTMLButtonElement>('.answer-button')].every(
+        ({ disabled }) => !disabled,
+      ),
+    ).toBe(true);
     expect(root.querySelector('.answer-button')?.textContent).toBe('');
     expect(root.querySelectorAll('.answer-button .book-open-icon')).toHaveLength(2);
-    expect((root.querySelector('.answer-button') as HTMLButtonElement).dataset.tooltip)
-      .toBe('정답 페이지 열기');
-    expect(root.querySelector('.answer-button')?.getAttribute('aria-label'))
-      .toBe('Two Sum 정답 페이지 열기');
+    expect((root.querySelector('.answer-button') as HTMLButtonElement).dataset.tooltip).toBe(
+      '정답 페이지 열기',
+    );
+    expect(root.querySelector('.answer-button')?.getAttribute('aria-label')).toBe(
+      'Two Sum 정답 페이지 열기',
+    );
     expect(root.querySelectorAll('.open-page-button')).toHaveLength(2);
     expect(root.querySelectorAll('.open-page-button .external-link-icon')).toHaveLength(2);
     expect(root.querySelector('.open-page-button')?.textContent).toBe('');
-    expect((root.querySelector('.open-page-button') as HTMLButtonElement).dataset.tooltip)
-      .toBe('LeetCode 페이지 열기');
-    expect(root.querySelector('.open-page-button')?.getAttribute('aria-label'))
-      .toBe('Two Sum LeetCode 페이지 열기');
+    expect((root.querySelector('.open-page-button') as HTMLButtonElement).dataset.tooltip).toBe(
+      'LeetCode 페이지 열기',
+    );
+    expect(root.querySelector('.open-page-button')?.getAttribute('aria-label')).toBe(
+      'Two Sum LeetCode 페이지 열기',
+    );
     expect(root.querySelectorAll('.delete-button .trash-icon')).toHaveLength(1);
     expect(root.querySelector('.delete-button')?.textContent).toBe('');
-    expect((root.querySelector('.delete-button') as HTMLButtonElement).dataset.tooltip)
-      .toBe('CaseUser.py 삭제');
-    expect(root.querySelector('.delete-button')?.getAttribute('aria-label'))
-      .toBe('CaseUser.py 풀이 파일 삭제');
+    expect((root.querySelector('.delete-button') as HTMLButtonElement).dataset.tooltip).toBe(
+      'CaseUser.py 삭제',
+    );
+    expect(root.querySelector('.delete-button')?.getAttribute('aria-label')).toBe(
+      'CaseUser.py 풀이 파일 삭제',
+    );
     expect(root.querySelectorAll('.file-icon')).toHaveLength(1);
     expect(root.querySelectorAll('.problem-group.week')).toHaveLength(2);
     expect(root.querySelector('.stats')).toBeNull();
     expect(root.querySelector('.stat-card')).toBeNull();
-    expect((root.querySelector('.unpushed-checkbox') as HTMLInputElement).checked)
-      .toBe(false);
-    expect((root.querySelector('.lint-button') as HTMLButtonElement).textContent)
-      .toBe('파일 맨 끝에 빈줄 추가하기');
+    expect((root.querySelector('.unpushed-checkbox') as HTMLInputElement).checked).toBe(false);
+    expect((root.querySelector('.lint-button') as HTMLButtonElement).textContent).toBe(
+      '파일 맨 끝에 빈줄 추가하기',
+    );
     expect(root.querySelector('.lint-action')).not.toBeNull();
     expect(root.querySelector('.lint-card')).toBeNull();
     expect(root.querySelector('.repository-title')).toBeNull();
     expect(root.querySelector('.view-tabs')).not.toBeNull();
     expect(root.querySelector('.view-tab.active')?.textContent).toBe('리스트');
-    const currentProblemButton = [...root.querySelectorAll<HTMLButtonElement>('.view-tab')]
-      .find(({ textContent }) => textContent === '현재 문제 보기');
+    const currentProblemButton = [...root.querySelectorAll<HTMLButtonElement>('.view-tab')].find(
+      ({ textContent }) => textContent === '현재 문제 보기',
+    );
     expect(currentProblemButton?.disabled).toBe(true);
     expect(currentProblemButton?.title).toContain('풀이 파일을 열면');
     expect(root.textContent).not.toContain('제출 파일 라인린트');
@@ -282,13 +302,10 @@ describe('webview rendering', () => {
     ui.busy = true;
     renderApp(root, { ...snapshot, preferredLanguage: 'typescript' }, ui, vi.fn());
 
-    const solutionButtons = [
-      ...root.querySelectorAll<HTMLButtonElement>('.solution-button'),
-    ];
+    const solutionButtons = [...root.querySelectorAll<HTMLButtonElement>('.solution-button')];
     expect(solutionButtons.map(({ textContent }) => textContent)).toEqual(['.ts', '.py']);
     expect(solutionButtons[0]?.getAttribute('aria-current')).toBe('true');
-    expect(solutionButtons[0]?.getAttribute('aria-label'))
-      .toBe('CaseUser.ts 풀이 파일 열기');
+    expect(solutionButtons[0]?.getAttribute('aria-label')).toBe('CaseUser.ts 풀이 파일 열기');
     expect(solutionButtons.every(({ disabled }) => disabled)).toBe(true);
   });
 
@@ -328,8 +345,9 @@ describe('webview rendering', () => {
     (root.querySelector('.solution-file-label') as HTMLElement).click();
     expect(post).not.toHaveBeenCalled();
 
-    const typeScriptButton = [...root.querySelectorAll<HTMLButtonElement>('.solution-button')]
-      .find(({ textContent }) => textContent === '.ts');
+    const typeScriptButton = [...root.querySelectorAll<HTMLButtonElement>('.solution-button')].find(
+      ({ textContent }) => textContent === '.ts',
+    );
     typeScriptButton?.click();
     expect(post).toHaveBeenCalledExactlyOnceWith({
       type: 'openSolution',
@@ -345,9 +363,7 @@ describe('webview rendering', () => {
         repositories: snapshot.repositories.map((repository) => ({
           ...repository,
           problems: repository.problems.map((problem) =>
-            problem.slug === 'two-sum'
-              ? { ...problem, solutionUrl: undefined }
-              : problem,
+            problem.slug === 'two-sum' ? { ...problem, solutionUrl: undefined } : problem,
           ),
         })),
       },
@@ -437,8 +453,9 @@ describe('webview rendering', () => {
       vi.fn(),
     );
 
-    expect([...root.querySelectorAll('.repository-title')].map(({ textContent }) => textContent))
-      .toEqual(['study-a', 'study-b']);
+    expect(
+      [...root.querySelectorAll('.repository-title')].map(({ textContent }) => textContent),
+    ).toEqual(['study-a', 'study-b']);
   });
 
   it('shows list-first navigation for the active solution and requests details on demand', () => {
@@ -459,21 +476,22 @@ describe('webview rendering', () => {
     expect(root.querySelector('.view-tab.active')?.textContent).toBe('리스트');
     expect(root.querySelectorAll('.problem-card')).toHaveLength(2);
 
-    const currentProblemButton = [...root.querySelectorAll<HTMLButtonElement>('.view-tab')]
-      .find(({ textContent }) => textContent === '현재 문제 보기');
+    const currentProblemButton = [...root.querySelectorAll<HTMLButtonElement>('.view-tab')].find(
+      ({ textContent }) => textContent === '현재 문제 보기',
+    );
     currentProblemButton?.click();
 
     expect(ui.viewMode).toBe('currentProblem');
     expect(root.querySelector('.current-problem')?.textContent).toContain('불러오는 중');
     expect(root.querySelector('.loading-state-panel')?.getAttribute('role')).toBe('status');
     expect(root.querySelector('.loading-state-panel .loading-spinner')).not.toBeNull();
-    expect(root.querySelector('.loading-description')?.textContent)
-      .toContain('문제 정보와 본문');
+    expect(root.querySelector('.loading-description')?.textContent).toContain('문제 정보와 본문');
     expect(root.querySelector('.problem-card')).toBeNull();
     expect(post).toHaveBeenCalledWith({ type: 'loadCurrentProblem' });
 
-    const listButton = [...root.querySelectorAll<HTMLButtonElement>('.view-tab')]
-      .find(({ textContent }) => textContent === '리스트');
+    const listButton = [...root.querySelectorAll<HTMLButtonElement>('.view-tab')].find(
+      ({ textContent }) => textContent === '리스트',
+    );
     listButton?.click();
     expect(ui.viewMode).toBe('list');
     expect(root.querySelectorAll('.problem-card')).toHaveLength(2);
@@ -513,10 +531,10 @@ describe('webview rendering', () => {
     );
 
     expect(root.querySelector('.problem-detail-title')?.textContent).toBe('1. Two Sum');
-    expect([...root.querySelectorAll('.problem-topic-tag')].map(({ textContent }) => textContent))
-      .toEqual(['Array', 'Hash Table']);
-    expect(root.querySelector('.problem-detail-content strong')?.textContent)
-      .toBe('two numbers');
+    expect(
+      [...root.querySelectorAll('.problem-topic-tag')].map(({ textContent }) => textContent),
+    ).toEqual(['Array', 'Hash Table']);
+    expect(root.querySelector('.problem-detail-content strong')?.textContent).toBe('two numbers');
     expect(root.querySelector('.problem-detail-content script')).toBeNull();
     expect(root.querySelector('.problem-detail-content img')?.hasAttribute('onerror')).toBe(false);
     expect(root.querySelector('.problem-detail-content a')?.hasAttribute('href')).toBe(false);
@@ -569,16 +587,18 @@ describe('webview rendering', () => {
       vi.fn(),
     );
 
-    expect(root.querySelector('.problem-detail-state')?.textContent)
-      .toContain('본문은 LeetCode에서 공개되지 않습니다');
+    expect(root.querySelector('.problem-detail-state')?.textContent).toContain(
+      '본문은 LeetCode에서 공개되지 않습니다',
+    );
     expect(root.querySelector('.problem-detail-content')).toBeNull();
   });
 
   it('switches between weekly and difficulty groups', () => {
     renderApp(root, snapshot, ui, vi.fn());
 
-    const difficultyButton = [...root.querySelectorAll<HTMLButtonElement>('.group-button')]
-      .find(({ textContent }) => textContent === '난이도');
+    const difficultyButton = [...root.querySelectorAll<HTMLButtonElement>('.group-button')].find(
+      ({ textContent }) => textContent === '난이도',
+    );
     difficultyButton?.click();
 
     expect(ui.groupBy).toBe('difficulty');
@@ -591,8 +611,7 @@ describe('webview rendering', () => {
   it('renders unpushed and unavailable Git states', () => {
     renderApp(root, { ...snapshot, preferredLanguage: 'typescript' }, ui, vi.fn());
 
-    expect(root.querySelector('.solution-git-status.unpushed')?.textContent)
-      .toBe('push 되지 않음');
+    expect(root.querySelector('.solution-git-status.unpushed')?.textContent).toBe('push 되지 않음');
 
     const unknownSnapshot: ExtensionSnapshot = {
       ...snapshot,
@@ -610,8 +629,9 @@ describe('webview rendering', () => {
     };
     renderApp(root, unknownSnapshot, ui, vi.fn());
 
-    expect(root.querySelector('.solution-git-status.unknown')?.textContent)
-      .toBe('푸시 상태 확인 불가');
+    expect(root.querySelector('.solution-git-status.unknown')?.textContent).toBe(
+      '푸시 상태 확인 불가',
+    );
 
     const checkingSnapshot: ExtensionSnapshot = {
       ...unknownSnapshot,
@@ -628,8 +648,9 @@ describe('webview rendering', () => {
     };
     renderApp(root, checkingSnapshot, ui, vi.fn());
 
-    expect(root.querySelector('.solution-git-status.checking')?.textContent)
-      .toBe('푸시 상태 확인 중');
+    expect(root.querySelector('.solution-git-status.checking')?.textContent).toBe(
+      '푸시 상태 확인 중',
+    );
   });
 
   it('stages and unstages verified-fork solutions from problem cards', () => {
@@ -649,7 +670,7 @@ describe('webview rendering', () => {
           solutions: problem.solutions.map((solution) =>
             solution.name === 'CaseUser.py'
               ? { ...solution, submissionStatus: 'working' as const }
-              : solution
+              : solution,
           ),
         })),
       })),
@@ -661,10 +682,9 @@ describe('webview rendering', () => {
     });
 
     renderApp(root, workingState, ui, post);
-    const addButton = [...root.querySelectorAll<HTMLButtonElement>('.stage-button')]
-      .find((button) =>
-        button.getAttribute('aria-label')?.includes('CaseUser.py 커밋에 추가')
-      );
+    const addButton = [...root.querySelectorAll<HTMLButtonElement>('.stage-button')].find(
+      (button) => button.getAttribute('aria-label')?.includes('CaseUser.py 커밋에 추가'),
+    );
     addButton?.click();
     expect(post).toHaveBeenCalledWith({
       type: 'stageSolution',
@@ -680,15 +700,15 @@ describe('webview rendering', () => {
           solutions: problem.solutions.map((solution) =>
             solution.name === 'CaseUser.ts'
               ? { ...solution, submissionStatus: 'staged-outdated' as const }
-              : solution
+              : solution,
           ),
         })),
       })),
     };
     renderApp(root, outdatedState, ui, post);
-    root.querySelector<HTMLButtonElement>(
-      '[aria-label*="CaseUser.ts 최신 수정 다시 추가"]',
-    )?.click();
+    root
+      .querySelector<HTMLButtonElement>('[aria-label*="CaseUser.ts 최신 수정 다시 추가"]')
+      ?.click();
     expect(post).toHaveBeenCalledWith({
       type: 'stageSolution',
       uri: 'file:///study-a/two-sum/CaseUser.ts',
@@ -715,16 +735,63 @@ describe('webview rendering', () => {
 
     (root.querySelector('.submission-commit-input') as HTMLInputElement).value =
       '[CaseUser] WEEK 01 Updated';
-    root.querySelector<HTMLInputElement>('.submission-commit-input')
+    root
+      .querySelector<HTMLInputElement>('.submission-commit-input')
       ?.dispatchEvent(new Event('input'));
-    const commitButton = [...root.querySelectorAll<HTMLButtonElement>(
-      '.submission-action-button',
-    )].find(({ textContent }) => textContent === '이 주차 커밋');
+    const commitButton = [
+      ...root.querySelectorAll<HTMLButtonElement>('.submission-action-button'),
+    ].find(({ textContent }) => textContent === '이 주차 커밋');
     commitButton?.click();
     expect(post).toHaveBeenCalledWith({
       type: 'commitActiveWeek',
       rootUri: 'file:///study-a',
       message: '[CaseUser] WEEK 01 Updated',
+    });
+  });
+
+  it('preserves commit input, focus and scroll on current-problem patches', () => {
+    ui.viewMode = 'submission';
+    const renderer = new WebviewRenderer(root, ui, vi.fn());
+    renderer.updateState(submissionSnapshot());
+    const input = root.querySelector<HTMLInputElement>('.submission-commit-input')!;
+    const graph = root.querySelector<HTMLElement>('.submission-graph')!;
+    input.value = '직접 작성한 커밋 메시지';
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+    input.setSelectionRange(3, 6);
+    graph.scrollTop = 120;
+
+    renderer.updateCurrentProblem({ ...currentProblemBase, status: 'loading' });
+
+    expect(root.querySelector('.submission-commit-input')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe('직접 작성한 커밋 메시지');
+    expect([input.selectionStart, input.selectionEnd]).toEqual([3, 6]);
+    expect(root.querySelector('.submission-graph')).toBe(graph);
+    expect(graph.scrollTop).toBe(120);
+  });
+
+  it('reuses the edited commit message after busy and full-state updates', () => {
+    ui.viewMode = 'submission';
+    const post = vi.fn();
+    const renderer = new WebviewRenderer(root, ui, post);
+    renderer.updateState(submissionSnapshot());
+    const input = root.querySelector<HTMLInputElement>('.submission-commit-input')!;
+    input.value = '보관할 커밋 메시지';
+    input.dispatchEvent(new Event('input'));
+
+    renderer.updateBusy(true);
+    renderer.updateBusy(false);
+    renderer.updateState(submissionSnapshot());
+
+    expect(root.querySelector<HTMLInputElement>('.submission-commit-input')?.value).toBe(
+      '보관할 커밋 메시지',
+    );
+    root.querySelector<HTMLButtonElement>('.staged .submission-action-button')!.click();
+    expect(post).toHaveBeenCalledWith({
+      type: 'commitActiveWeek',
+      rootUri: 'file:///study-a',
+      message: '보관할 커밋 메시지',
     });
   });
 
@@ -760,11 +827,11 @@ describe('webview rendering', () => {
 
     renderApp(root, closed, ui, vi.fn());
 
-    expect(root.querySelector('.submission-node-title')?.textContent)
-      .toBe('PR #77 · 종료됨 · 미병합');
+    expect(root.querySelector('.submission-node-title')?.textContent).toBe(
+      'PR #77 · 종료됨 · 미병합',
+    );
     expect(
-      root.querySelector<HTMLButtonElement>('.pull-request .submission-action-button')
-        ?.textContent,
+      root.querySelector<HTMLButtonElement>('.pull-request .submission-action-button')?.textContent,
     ).toBe('GitHub에서 열기');
   });
 
@@ -782,7 +849,8 @@ describe('webview rendering', () => {
           fork: {
             ...repository.submission!.fork,
             status: 'unavailable',
-            reason: 'GitHub API 요청 한도에 걸렸습니다. GitHub으로 로그인하면 상태를 확인할 수 있습니다.',
+            reason:
+              'GitHub API 요청 한도에 걸렸습니다. GitHub으로 로그인하면 상태를 확인할 수 있습니다.',
             needsGitHubSignIn: true,
           },
         },
@@ -792,8 +860,9 @@ describe('webview rendering', () => {
     renderApp(root, unavailable, ui, post);
 
     expect(root.textContent).toContain('GitHub으로 로그인하면');
-    const button = [...root.querySelectorAll<HTMLButtonElement>('button')]
-      .find(({ textContent }) => textContent === 'GitHub으로 로그인');
+    const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === 'GitHub으로 로그인',
+    );
     expect(button).toBeDefined();
     button?.click();
     expect(post).toHaveBeenCalledWith({ type: 'signInGitHub' });
@@ -848,15 +917,17 @@ describe('webview rendering', () => {
           forkFiles: [],
           activePullRequest: undefined,
           pullRequest: undefined,
-          pendingCommits: [{
-            hash: 'abcdef0123456789',
-            shortHash: 'abcdef0',
-            message: '[CaseUser] WEEK 01 Solutions',
-            pushed: false,
-            files: [localFile],
-            otherFiles: [],
-            fileInspectionStatus: 'ready',
-          }],
+          pendingCommits: [
+            {
+              hash: 'abcdef0123456789',
+              shortHash: 'abcdef0',
+              message: '[CaseUser] WEEK 01 Solutions',
+              pushed: false,
+              files: [localFile],
+              otherFiles: [],
+              fileInspectionStatus: 'ready',
+            },
+          ],
           localHistory: {
             status: 'ready',
             baseRef: 'upstream/main',
@@ -872,8 +943,9 @@ describe('webview rendering', () => {
     expect(root.textContent).toContain('GitHub 상태를 확인할 수 없습니다.');
     expect(root.textContent).toContain('commit abcdef0 · 풀이 1개');
     expect(root.textContent).toContain(localFile.relativePath);
-    const push = [...root.querySelectorAll<HTMLButtonElement>('button')]
-      .find(({ textContent }) => textContent === 'origin에 push');
+    const push = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === 'origin에 push',
+    );
     expect(push?.disabled).toBe(true);
   });
 
@@ -898,21 +970,23 @@ describe('webview rendering', () => {
           submissionBranch: 'week-11',
           activeSubmissionWeek: 11,
           stagedFiles: [],
-          pendingCommits: [{
-            hash: '5e06873500000000',
-            shortHash: '5e06873',
-            message: '[CaseUser] WEEK 11 Solutions',
-            pushed: false,
-            files: slugs.map((slug) => ({
-              name: 'CaseUser.py',
-              uri: `file:///study-a/${slug}/CaseUser.py`,
-              relativePath: `${slug}/CaseUser.py`,
-              slug,
-              week: 11,
-            })),
-            otherFiles: [],
-            fileInspectionStatus: 'ready',
-          }],
+          pendingCommits: [
+            {
+              hash: '5e06873500000000',
+              shortHash: '5e06873',
+              message: '[CaseUser] WEEK 11 Solutions',
+              pushed: false,
+              files: slugs.map((slug) => ({
+                name: 'CaseUser.py',
+                uri: `file:///study-a/${slug}/CaseUser.py`,
+                relativePath: `${slug}/CaseUser.py`,
+                slug,
+                week: 11,
+              })),
+              otherFiles: [],
+              fileInspectionStatus: 'ready',
+            },
+          ],
           forkFiles: [],
           otherForkFiles: [],
           activePullRequest: undefined,
@@ -933,8 +1007,9 @@ describe('webview rendering', () => {
     renderApp(root, current, ui, vi.fn());
 
     expect(root.textContent).toContain('commit 5e06873 · 풀이 5개');
-    const push = [...root.querySelectorAll<HTMLButtonElement>('button')]
-      .find(({ textContent }) => textContent === 'origin에 push');
+    const push = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === 'origin에 push',
+    );
     expect(push?.disabled).toBe(false);
   });
 
@@ -951,16 +1026,18 @@ describe('webview rendering', () => {
           forkFiles: [],
           activePullRequest: undefined,
           pullRequest: undefined,
-          pendingCommits: [{
-            hash: 'abcdef0123456789',
-            shortHash: 'abcdef0',
-            message: 'local commit',
-            pushed: false,
-            files: [],
-            otherFiles: [],
-            fileInspectionStatus: 'unavailable',
-            fileInspectionReason: '변경 파일을 확인할 수 없습니다: diff failed',
-          }],
+          pendingCommits: [
+            {
+              hash: 'abcdef0123456789',
+              shortHash: 'abcdef0',
+              message: 'local commit',
+              pushed: false,
+              files: [],
+              otherFiles: [],
+              fileInspectionStatus: 'unavailable',
+              fileInspectionReason: '변경 파일을 확인할 수 없습니다: diff failed',
+            },
+          ],
           blockedReason: '일부 로컬 커밋의 변경 파일을 확인할 수 없어 push할 수 없습니다.',
         },
       })),
@@ -999,8 +1076,9 @@ describe('webview rendering', () => {
     renderApp(root, empty, ui, post);
 
     expect(root.textContent).toContain('공식 main을 포크에 반영하면');
-    const button = [...root.querySelectorAll<HTMLButtonElement>('button')]
-      .find(({ textContent }) => textContent === '지금 맞추기');
+    const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === '지금 맞추기',
+    );
     expect(button).toBeDefined();
     expect(button?.disabled).toBe(false);
     button?.click();
@@ -1028,8 +1106,9 @@ describe('webview rendering', () => {
 
     renderApp(root, onWeekBranch, ui, vi.fn());
 
-    const syncButton = [...root.querySelectorAll<HTMLButtonElement>('button')]
-      .find(({ textContent }) => textContent === '포크 동기화');
+    const syncButton = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === '포크 동기화',
+    );
     expect(syncButton?.disabled).toBe(true);
     expect(syncButton?.title).toBe('포크 동기화는 main 브랜치에서만 실행할 수 있습니다.');
   });
@@ -1047,11 +1126,13 @@ describe('webview rendering', () => {
           behindOfficialMain: true,
           canSync: false,
           syncDisabledReason: '풀이 외 추적 파일 변경을 되돌린 뒤 포크를 동기화해 주세요.',
-          blockingTrackedFiles: [{
-            relativePath: 'README.md',
-            kind: 'other',
-            state: 'modified',
-          }],
+          blockingTrackedFiles: [
+            {
+              relativePath: 'README.md',
+              kind: 'other',
+              state: 'modified',
+            },
+          ],
           stagedFiles: [],
           pendingCommits: [],
           forkFiles: [],
@@ -1066,14 +1147,18 @@ describe('webview rendering', () => {
     renderApp(root, behind, ui, post);
 
     expect(root.textContent).toContain('공식 main을 포크에 반영하면');
-    expect(root.textContent).toContain('풀이 외 추적 파일 변경을 되돌린 뒤 포크를 동기화해 주세요.');
+    expect(root.textContent).toContain(
+      '풀이 외 추적 파일 변경을 되돌린 뒤 포크를 동기화해 주세요.',
+    );
     expect(root.textContent).toContain('README.md');
-    const connectButton = [...root.querySelectorAll<HTMLButtonElement>('button')]
-      .find(({ textContent }) => textContent === '지금 맞추기');
+    const connectButton = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === '지금 맞추기',
+    );
     expect(connectButton?.disabled).toBe(true);
     expect(connectButton?.title).toBe('풀이 외 추적 파일 변경을 되돌린 뒤 포크를 동기화해 주세요.');
-    const restore = [...root.querySelectorAll<HTMLButtonElement>('button')]
-      .find(({ textContent }) => textContent === '풀이 외 변경 되돌리기');
+    const restore = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === '풀이 외 변경 되돌리기',
+    );
     expect(restore).toBeDefined();
     restore?.click();
     expect(post).toHaveBeenCalledWith({
@@ -1147,9 +1232,9 @@ describe('webview rendering', () => {
     ui.viewMode = 'submission';
     renderApp(root, merged, ui, post);
 
-    const button = [...root.querySelectorAll<HTMLButtonElement>(
-      '.submission-header-button',
-    )].find(({ textContent }) => textContent === 'main으로 돌아가 동기화');
+    const button = [...root.querySelectorAll<HTMLButtonElement>('.submission-header-button')].find(
+      ({ textContent }) => textContent === 'main으로 돌아가 동기화',
+    );
     expect(button?.disabled).toBe(false);
     button?.click();
     expect(post).toHaveBeenCalledWith({
@@ -1211,17 +1296,21 @@ describe('webview rendering', () => {
     (root.querySelector('#preferred-language') as HTMLSelectElement).value = 'typescript';
     root.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true }));
     (root.querySelector('.lint-button') as HTMLButtonElement).click();
-    (root.querySelector('.problem-card.completed .problem-card-action') as HTMLButtonElement).click();
-    (root.querySelector(
-      '.problem-card.completed .other-solution-button',
-    ) as HTMLButtonElement).click();
+    (
+      root.querySelector('.problem-card.completed .problem-card-action') as HTMLButtonElement
+    ).click();
+    (
+      root.querySelector('.problem-card.completed .other-solution-button') as HTMLButtonElement
+    ).click();
     const solutionButtons = root.querySelectorAll<HTMLButtonElement>('.solution-button');
     solutionButtons[0]?.click();
     solutionButtons[1]?.click();
     (root.querySelector('.delete-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.completed .answer-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.completed .open-page-button') as HTMLButtonElement).click();
-    (root.querySelector('.problem-card.incomplete .problem-card-action') as HTMLButtonElement).click();
+    (
+      root.querySelector('.problem-card.incomplete .problem-card-action') as HTMLButtonElement
+    ).click();
     (root.querySelector('.problem-card.incomplete .answer-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.incomplete .open-page-button') as HTMLButtonElement).click();
 
@@ -1353,8 +1442,7 @@ describe('webview rendering', () => {
       type: 'runCurrentSolution',
       candidateId: 'c0m0',
     });
-    expect(root.querySelector('.runner-title')?.textContent)
-      .toBe('로컬 Python 풀이 테스트');
+    expect(root.querySelector('.runner-title')?.textContent).toBe('로컬 Python 풀이 테스트');
     expect(root.textContent).not.toContain('OS 보안 샌드박스가 아니며');
   });
 
@@ -1381,8 +1469,9 @@ describe('webview rendering', () => {
 
     expect(root.textContent).toContain('본문 요청 실패');
     expect(root.querySelector('.runner-unavailable')?.textContent).toContain('ListNode');
-    expect((root.querySelector('.runner-unavailable') as HTMLElement).dataset.missingObjects)
-      .toBe('ListNode');
+    expect((root.querySelector('.runner-unavailable') as HTMLElement).dataset.missingObjects).toBe(
+      'ListNode',
+    );
   });
 
   it('renders dataset pass and first-failure results', () => {
@@ -1416,8 +1505,9 @@ describe('webview rendering', () => {
       ui,
       vi.fn(),
     );
-    expect(root.querySelector('.runner-passed')?.textContent)
-      .toContain('12/12개 테스트 통과 · 34ms');
+    expect(root.querySelector('.runner-passed')?.textContent).toContain(
+      '12/12개 테스트 통과 · 34ms',
+    );
 
     renderApp(
       root,
@@ -1442,8 +1532,7 @@ describe('webview rendering', () => {
       vi.fn(),
     );
     expect(root.querySelector('.runner-failed')?.textContent).toContain('2번째 테스트 실패');
-    expect(root.querySelector('.runner-assertion')?.textContent)
-      .toBe('assert candidate(2) == 3');
+    expect(root.querySelector('.runner-assertion')?.textContent).toBe('assert candidate(2) == 3');
   });
 
   it('keeps a runner status row while a test is running', () => {
@@ -1474,13 +1563,12 @@ describe('webview rendering', () => {
       vi.fn(),
     );
 
-    expect(root.querySelector('.runner-running')?.textContent)
-      .toBe('테스트를 실행하는 중…');
-    expect(root.querySelector('.runner-running.loading-state')?.getAttribute('role'))
-      .toBe('status');
+    expect(root.querySelector('.runner-running')?.textContent).toBe('테스트를 실행하는 중…');
+    expect(root.querySelector('.runner-running.loading-state')?.getAttribute('role')).toBe(
+      'status',
+    );
     expect(root.querySelector('.runner-running .loading-spinner')).not.toBeNull();
-    expect((root.querySelector('.runner-button') as HTMLButtonElement).disabled)
-      .toBe(true);
+    expect((root.querySelector('.runner-button') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('disables creation in an untrusted workspace', () => {
@@ -1491,12 +1579,14 @@ describe('webview rendering', () => {
     const deleteButton = root.querySelector('.delete-button') as HTMLButtonElement;
     expect(create.disabled).toBe(true);
     expect(create.title).toContain('워크스페이스를 신뢰');
-    expect(root.querySelector('.problem-card.incomplete .solution-status')?.textContent)
-      .toBe('풀이 없음워크스페이스 신뢰 후 생성');
+    expect(root.querySelector('.problem-card.incomplete .solution-status')?.textContent).toBe(
+      '풀이 없음워크스페이스 신뢰 후 생성',
+    );
     expect(deleteButton.disabled).toBe(true);
     expect(deleteButton.dataset.tooltip).toContain('워크스페이스를 신뢰');
     expect((root.querySelector('.lint-button') as HTMLButtonElement).disabled).toBe(true);
-    expect(root.querySelector('.solution-create-hint')?.textContent)
-      .toBe('워크스페이스 신뢰 후 생성');
+    expect(root.querySelector('.solution-create-hint')?.textContent).toBe(
+      '워크스페이스 신뢰 후 생성',
+    );
   });
 });

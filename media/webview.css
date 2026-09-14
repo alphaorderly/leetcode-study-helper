@@ -592,7 +592,10 @@ button:disabled {
   padding: 9px;
   border-radius: 2px;
   background: var(--ui-surface);
-  transition: opacity 120ms ease, border-color 120ms ease, background 120ms ease;
+  transition:
+    opacity 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
 }
 
 .problem-card.incomplete {
@@ -905,7 +908,9 @@ button:disabled {
   pointer-events: none;
   text-align: left;
   white-space: normal;
-  transition: opacity 100ms ease, visibility 100ms ease;
+  transition:
+    opacity 100ms ease,
+    visibility 100ms ease;
 }
 
 .solution-action-buttons [data-tooltip]:hover::after,

@@ -1,3 +1,4 @@
+/** 설치된 테스트용 VS Code 실행 경로 차이를 보정한 뒤 통합 테스트 CLI를 실행합니다. */
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import path from 'node:path';

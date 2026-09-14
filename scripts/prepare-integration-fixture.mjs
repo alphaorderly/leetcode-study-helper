@@ -1,3 +1,4 @@
+/** 통합 테스트 전용 .tmp 워크스페이스와 로컬 Git 저장소를 다시 준비합니다. */
 import { execFile } from 'node:child_process';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -74,19 +75,14 @@ for (let index = 1; index <= 8; index += 1) {
   await execFileAsync('git', ['commit', '-m', `Personal main ${index}`], { cwd: workspaceA });
 }
 await execFileAsync('git', ['push', '--set-upstream', 'origin', 'main'], { cwd: workspaceA });
-await execFileAsync(
-  'git',
-  ['update-ref', 'refs/remotes/upstream/main', officialCommit],
-  { cwd: workspaceA },
-);
+await execFileAsync('git', ['update-ref', 'refs/remotes/upstream/main', officialCommit], {
+  cwd: workspaceA,
+});
 await execFileAsync('git', ['branch', '-D', 'official-main'], { cwd: workspaceA });
 
 await execFileAsync('git', ['switch', '-c', 'week-11', baseCommit], { cwd: workspaceA });
 for (const slug of week11Slugs) {
-  await writeFile(
-    resolve(workspaceA, slug, 'CaseUser.py'),
-    `# ${slug} integration solution\n`,
-  );
+  await writeFile(resolve(workspaceA, slug, 'CaseUser.py'), `# ${slug} integration solution\n`);
 }
 await execFileAsync('git', ['add', ...week11Slugs], { cwd: workspaceA });
 await execFileAsync('git', ['commit', '-m', '[CaseUser] WEEK 11 Solutions'], {

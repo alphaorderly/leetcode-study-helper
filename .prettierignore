@@ -1,0 +1,11 @@
+node_modules/
+dist/
+out/
+.tmp/
+.vscode-test/
+.artifacts/
+resources/
+test/fixtures/
+yarn.lock
+media/*.svg
+*.md
