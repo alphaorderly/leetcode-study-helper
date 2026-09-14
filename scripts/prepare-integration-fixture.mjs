@@ -1,4 +1,9 @@
-/** 통합 테스트 전용 .tmp 워크스페이스와 로컬 Git 저장소를 다시 준비합니다. */
+/**
+ * 현재 프로젝트의 .tmp를 지우고 fixture 원본을 복사하여 통합 테스트용 저장소를 만듭니다.
+ * Git 생성·커밋·push는 .tmp 안의 작업 저장소와 로컬 bare origin을 대상으로 합니다.
+ * upstream URL은 테스트 신원용이며 이 스크립트가 실제 원격에 push하지 않습니다.
+ * 실행은 프로젝트 루트에서 하며 test/fixtures 원본을 편집하지 않습니다.
+ */
 import { execFile } from 'node:child_process';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';

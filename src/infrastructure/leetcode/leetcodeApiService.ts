@@ -70,7 +70,11 @@ function parseProblemDetail(value: unknown): LeetCodeProblemDetail {
   };
 }
 
-/** LeetCode 문제 설명을 읽고 slug별 요청 Promise를 공유합니다. */
+/**
+ * 현재 문제 세션에 LeetCode 설명을 공급합니다. slug별 진행 중 요청과 성공 결과를 공유하고
+ * 실패한 Promise만 제거해 다음 호출에서 재시도합니다. 선택 파일 변경에 따른 응답 폐기는
+ * 세션이 담당하며 이 서비스는 다른 선택에서도 재사용할 설명을 보관합니다.
+ */
 export class LeetCodeApiService {
   private readonly cache = new Map<string, Promise<LeetCodeProblemDetail>>();
 

@@ -45,7 +45,12 @@ function isCancellation(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-/** 활성 편집기의 문제 설명과 Python 분석·실행 상태를 관리합니다. */
+/**
+ * StudyController가 소유하는 현재 풀이 세션입니다. 편집기 URI로 저장소의 풀이를 선택합니다.
+ * 설명은 slug별로 보관하고, Python 분석·실행은 파일별로 취소하므로 두 상태의 수명이 다릅니다.
+ * 편집·설정 변경은 분석을 지연 예약하고 실행을 중단합니다. 파일 전환은 이전 결과를 무효화합니다.
+ * 생성자는 이벤트를 구독하며 dispose는 예약·요청·자식 프로세스와 구독을 정리합니다.
+ */
 export class CurrentProblemSession implements vscode.Disposable {
   private readonly leetCodeApiService: Pick<LeetCodeApiService, 'getProblem'>;
   private readonly testDataService: Pick<LeetCodeTestDataService, 'getProblem'>;
@@ -117,7 +122,12 @@ export class CurrentProblemSession implements vscode.Disposable {
     this.syncSelection();
   }
 
-  /** slug별 진행 중인 요청과 성공 결과를 재사용합니다. 응답은 현재 선택된 문제에만 게시합니다. */
+  /**
+   * 현재 선택의 slug별 설명 상태를 loading으로 바꾼 뒤 API를 조회합니다.
+   * loading·loaded이면 중복 요청을 건너뛰고 error는 다음 호출에서 재시도합니다.
+   * 파일을 전환해도 응답은 캐시에 남기되, 게시 시점에 같은 slug를 보고 있을 때만 알립니다.
+   * 설명 실패는 세션의 error 상태로 게시하며 호출자에게 예외를 던지지 않습니다.
+   */
   async loadProblem(): Promise<void> {
     const selection = this.selection;
     if (!selection) {
@@ -147,9 +157,28 @@ export class CurrentProblemSession implements vscode.Disposable {
   /**
    * 선택한 Python 후보를 실행하며 이전 실행을 취소합니다.
    * 취소되거나 다른 파일로 전환한 뒤 도착한 결과는 화면에 반영하지 않습니다.
+   * 입력 준비 오류는 호출자에게 전달하고, Python 실행 오류는 runner.error로 게시합니다.
    * @throws 워크스페이스가 신뢰되지 않거나 후보·테스트 데이터를 사용할 수 없는 경우.
    */
   async run(candidateId: string): Promise<void> {
+    const { selection, candidates } = this.requireRunCandidate(candidateId);
+
+    this.cancelRun();
+    const controller = new AbortController();
+    this.runController = controller;
+    const prepared = await this.prepareRun(selection, controller);
+    if (!this.canPublishResult(selection, controller.signal)) {
+      this.releaseRunController(controller);
+      return;
+    }
+    await this.executeRun(selection, candidates, candidateId, controller, prepared);
+  }
+
+  /** 현재 후보와 신뢰 상태를 확인합니다. 실패 시 기존 러너 표시와 진행 중 실행을 유지합니다. */
+  private requireRunCandidate(candidateId: string): {
+    selection: CurrentSelection;
+    candidates: PythonSolutionCandidate[];
+  } {
     if (!vscode.workspace.isTrusted) {
       throw new Error('Python 풀이를 실행하려면 먼저 워크스페이스를 신뢰해야 합니다.');
     }
@@ -165,29 +194,39 @@ export class CurrentProblemSession implements vscode.Disposable {
       throw new Error('선택한 풀이 후보를 찾지 못했습니다.');
     }
 
-    this.cancelRun();
-    const controller = new AbortController();
-    this.runController = controller;
-    let data: LeetCodePythonTestData | undefined;
-    let source: string;
+    return { selection, candidates };
+  }
+
+  /**
+   * 실행 입력을 읽습니다. 읽기 실패는 명령 오류로 전달하며 러너 결과로 바꾸지 않습니다.
+   * 반환 후 실행 여부는 호출자가 최신 선택과 취소 신호로 확인합니다.
+   * 입력 읽기에 실패한 경우에만 여기서 이 요청이 소유한 제어기를 정리합니다.
+   */
+  private async prepareRun(
+    selection: CurrentSelection,
+    controller: AbortController,
+  ): Promise<{ data: LeetCodePythonTestData; source: string }> {
     try {
-      data = await this.testDataService.getProblem(selection.slug);
+      const data = await this.testDataService.getProblem(selection.slug);
       if (!data) {
         throw new Error('이 문제는 포함된 데이터셋에 테스트 데이터가 없습니다.');
       }
-      source = await this.currentSource(selection.solution.uri);
-      if (controller.signal.aborted || this.selection?.solution.uri !== selection.solution.uri) {
-        if (this.runController === controller) {
-          this.runController = undefined;
-        }
-        return;
-      }
+      const source = await this.currentSource(selection.solution.uri);
+      return { data, source };
     } catch (error) {
-      if (this.runController === controller) {
-        this.runController = undefined;
-      }
+      this.releaseRunController(controller);
       throw error;
     }
+  }
+
+  /** 준비 완료 후에만 running을 게시합니다. 실행 실패는 후보를 보존한 error 상태로 표시합니다. */
+  private async executeRun(
+    selection: CurrentSelection,
+    candidates: PythonSolutionCandidate[],
+    candidateId: string,
+    controller: AbortController,
+    { source, data }: { source: string; data: LeetCodePythonTestData },
+  ): Promise<void> {
     this.setRunner({
       status: 'running',
       candidates,
@@ -204,7 +243,7 @@ export class CurrentProblemSession implements vscode.Disposable {
         this.pythonExecutable(),
         controller.signal,
       );
-      if (controller.signal.aborted || this.selection?.solution.uri !== selection.solution.uri) {
+      if (!this.canPublishResult(selection, controller.signal)) {
         return;
       }
       this.setRunner(toRunnerSnapshot(result, candidates, candidateId));
@@ -218,9 +257,7 @@ export class CurrentProblemSession implements vscode.Disposable {
         });
       }
     } finally {
-      if (this.runController === controller) {
-        this.runController = undefined;
-      }
+      this.releaseRunController(controller);
     }
   }
 
@@ -235,7 +272,11 @@ export class CurrentProblemSession implements vscode.Disposable {
     this.changeEmitter.dispose();
   }
 
-  /** 활성 풀이를 맞추고 선택이 바뀌면 이전 분석·실행을 취소한 뒤 새 분석을 예약합니다. */
+  /**
+   * 저장소 목록 또는 편집기 변화 후 등록된 풀이를 다시 찾습니다.
+   * URI가 달라질 때만 이전 분석·실행을 취소하고 runner를 checking으로 초기화합니다.
+   * 같은 파일의 Git 스냅샷 갱신은 실행을 중단하지 않고 선택 정보만 새 것으로 바꿉니다.
+   */
   private syncSelection(): void {
     const next = this.findSelection();
     const previousUri = this.selection?.solution.uri;
@@ -346,7 +387,7 @@ export class CurrentProblemSession implements vscode.Disposable {
         this.pythonExecutable(),
         controller.signal,
       );
-      if (controller.signal.aborted || this.selection?.solution.uri !== selection.solution.uri) {
+      if (!this.canPublishResult(selection, controller.signal)) {
         return;
       }
       if (inspection.missingObjects.length > 0) {
@@ -375,9 +416,7 @@ export class CurrentProblemSession implements vscode.Disposable {
         });
       }
     } finally {
-      if (this.inspectionController === controller) {
-        this.inspectionController = undefined;
-      }
+      this.releaseInspectionController(controller);
     }
   }
 
@@ -401,7 +440,10 @@ export class CurrentProblemSession implements vscode.Disposable {
     );
   }
 
-  /** 실행 상태가 현재 선택한 풀이에 속할 때만 반영하고 발행합니다. */
+  /**
+   * 현재 runner가 선택 파일에 귀속될 때만 상태를 게시합니다. 이 함수는 비동기 요청의
+   * 취소 신호까지 알지 못하므로 호출자는 await 이후 canPublishResult 또는 취소 검사를 먼저 수행합니다.
+   */
   private setRunner(runner: PythonRunnerSnapshot): void {
     const selection = this.selection;
     if (!selection || this.runnerUri !== selection.solution.uri) {
@@ -409,6 +451,21 @@ export class CurrentProblemSession implements vscode.Disposable {
     }
     this.runner = runner;
     this.emitCurrent();
+  }
+
+  /** 취소되지 않은 요청이 여전히 선택된 파일을 위한 결과인지 확인합니다. 제어기 정리 조건과 다릅니다. */
+  private canPublishResult(selection: CurrentSelection, signal: AbortSignal): boolean {
+    return !signal.aborted && this.selection?.solution.uri === selection.solution.uri;
+  }
+
+  /** 이전 실행의 finally가 새 실행의 취소 제어기를 지우지 않도록 소유권을 확인합니다. */
+  private releaseRunController(controller: AbortController): void {
+    if (this.runController === controller) this.runController = undefined;
+  }
+
+  /** 분석이 교체된 뒤 이전 분석의 finally가 호출되어도 새 제어기는 보존합니다. */
+  private releaseInspectionController(controller: AbortController): void {
+    if (this.inspectionController === controller) this.inspectionController = undefined;
   }
 
   /** 진행 중인 Python 분석에 취소를 요청하고 제어기를 해제합니다. */

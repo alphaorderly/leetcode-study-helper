@@ -10,39 +10,45 @@ function nonce(): string {
   ).join('');
 }
 
+const WEBVIEW_MESSAGE_TYPES: Record<WebviewToExtensionMessage['type'], true> = {
+  ready: true,
+  refresh: true,
+  saveSettings: true,
+  openSolution: true,
+  openOtherSolution: true,
+  openProblem: true,
+  openAnswer: true,
+  loadCurrentProblem: true,
+  runCurrentSolution: true,
+  deleteSolution: true,
+  fixAllSolutions: true,
+  createSolution: true,
+  stageSolution: true,
+  unstageSolution: true,
+  commitActiveWeek: true,
+  pushActiveWeek: true,
+  openPullRequest: true,
+  syncFork: true,
+  discardOtherTrackedChanges: true,
+  returnToMainAndSync: true,
+  refreshSubmission: true,
+  signInGitHub: true,
+};
+
 /** 알려진 메시지 type인지 확인하며 개별 payload 필드의 유효성까지 검사하지는 않습니다. */
 function isWebviewMessage(value: unknown): value is WebviewToExtensionMessage {
   if (typeof value !== 'object' || value === null || !('type' in value)) {
     return false;
   }
   const type = (value as { type?: unknown }).type;
-  return (
-    type === 'ready' ||
-    type === 'refresh' ||
-    type === 'saveSettings' ||
-    type === 'openSolution' ||
-    type === 'openOtherSolution' ||
-    type === 'openProblem' ||
-    type === 'openAnswer' ||
-    type === 'loadCurrentProblem' ||
-    type === 'runCurrentSolution' ||
-    type === 'deleteSolution' ||
-    type === 'fixAllSolutions' ||
-    type === 'createSolution' ||
-    type === 'stageSolution' ||
-    type === 'unstageSolution' ||
-    type === 'commitActiveWeek' ||
-    type === 'pushActiveWeek' ||
-    type === 'openPullRequest' ||
-    type === 'syncFork' ||
-    type === 'discardOtherTrackedChanges' ||
-    type === 'returnToMainAndSync' ||
-    type === 'refreshSubmission' ||
-    type === 'signInGitHub'
-  );
+  return typeof type === 'string' && Object.hasOwn(WEBVIEW_MESSAGE_TYPES, type);
 }
 
-/** 웹뷰 메시지를 명령으로 전달하고 전체·현재 문제 상태를 구분해 게시합니다. */
+/**
+ * 확장 호스트와 브라우저 웹뷰 사이의 메시지 경계입니다. VS Code API 호출은 컨트롤러에
+ * 위임하고 전체·현재 문제 변경을 다른 메시지로 게시합니다.
+ * 생성 시 컨트롤러 이벤트를 구독하고 dispose에서 해당 구독을 해제합니다.
+ */
 export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private view: vscode.WebviewView | undefined;
   private readonly changeSubscriptions: vscode.Disposable[];
@@ -87,7 +93,11 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
     }
   }
 
-  /** 웹뷰 명령을 컨트롤러로 전달하며 작업 실패는 VS Code 오류 알림으로 표시합니다. */
+  /**
+   * 메시지 종류를 컨트롤러 명령에 대응시킵니다. 긴 작업은 withBusy로 감싸 화면 버튼에
+   * 진행 여부를 전달합니다. 현재 문제 분석·실행은 자체 runner 상태를 사용합니다.
+   * 컨트롤러가 던진 오류는 VS Code 알림으로 표시하고 메시지 수신 Promise 밖으로 전파하지 않습니다.
+   */
   private async handleMessage(message: WebviewToExtensionMessage): Promise<void> {
     try {
       switch (message.type) {
@@ -176,7 +186,10 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
     }
   }
 
-  /** 작업 전후 busy 상태를 전송하며 실패 시에도 busy를 해제합니다. */
+  /**
+   * 웹뷰에 작업 중 표시를 전달하고 finally에서 해제합니다. 작업 결과와 예외는 호출자에게 돌려줍니다.
+   * 이 플래그는 UI 안내이며 명령 큐나 동시 실행 잠금으로 사용하지 않습니다.
+   */
   private async withBusy<T>(action: () => Promise<T>): Promise<T> {
     await this.post({ type: 'busy', value: true });
     try {
@@ -188,7 +201,11 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
 
   /** 웹뷰가 있으면 메시지를 보내고 없으면 전송을 건너뜁니다. */
   private async post(message: ExtensionToWebviewMessage): Promise<boolean> {
-    return (await this.view?.webview.postMessage(message)) ?? false;
+    const webview = this.view?.webview;
+    if (!webview) {
+      return false;
+    }
+    return await webview.postMessage(message);
   }
 
   /** 확장 리소스 URI와 CSP nonce를 포함한 웹뷰 HTML을 생성합니다. */

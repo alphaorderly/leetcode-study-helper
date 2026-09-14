@@ -3,7 +3,10 @@ const ANSWER_ORIGINS = new Set(['https://algodale.com', 'https://www.algodale.co
 
 export const ANSWER_CONFIRM_LABEL = '이동';
 
-/** 지원하는 정답 URL을 정규화합니다. 허용되지 않는 URL이면 undefined입니다. */
+/**
+ * 정답 링크로 허용한 HTTPS origin과 /problems/ 아래 경로만 받아 URL 문자열로 정규화합니다.
+ * 인증 정보가 포함되었거나 URL 해석에 실패하면 undefined입니다. 이 함수는 브라우저를 열지 않습니다.
+ */
 export function normalizeAnswerUrl(value: string): string | undefined {
   try {
     const url = new URL(value);

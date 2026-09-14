@@ -66,7 +66,11 @@ export function preferredSolution(
   );
 }
 
-/** 검색어, 완료 필터와 미푸시 필터를 모두 만족하는 문제를 원래 순서대로 반환합니다. */
+/**
+ * 검색·완료·미푸시 조건을 교집합으로 적용하며 입력 목록을 변경하지 않습니다.
+ * 미푸시 판단은 선호 언어의 대표 풀이를 사용하고 completed는 파일 존재 여부입니다.
+ * 검색 대상은 slug·표시 제목·난이도·주차이며 카탈로그의 모든 메타데이터를 검색하지는 않습니다.
+ */
 export function visibleProblems(
   repository: RepositorySnapshot,
   state: ExtensionSnapshot,
@@ -158,141 +162,14 @@ function groupByDifficulty(problems: ProblemSnapshot[]): ProblemGroup[] {
     difficultyProblems.push(problem);
     groups.set(key, difficultyProblems);
   }
-  return [
-    ['easy', '쉬움'],
-    ['medium', '보통'],
-    ['hard', '어려움'],
-    ['unknown', '알 수 없음'],
-  ]
-    .map(([key, label]) => ({ label: label!, problems: groups.get(key!) ?? [], kind: key }))
+  return (
+    [
+      ['easy', '쉬움'],
+      ['medium', '보통'],
+      ['hard', '어려움'],
+      ['unknown', '알 수 없음'],
+    ] as const
+  )
+    .map(([key, label]) => ({ label, problems: groups.get(key) ?? [], kind: key }))
     .filter(({ problems: difficultyProblems }) => difficultyProblems.length > 0);
-}
-
-import type { SolutionFileSnapshot, SolutionSubmissionStatus } from '../../shared/contracts';
-
-/** 제출 상태가 알려져 있으면 우선 표시하고, 아니면 upstream 반영 상태를 표시합니다. */
-export function gitStatusLabel(
-  solution: ProblemSnapshot['solutions'][number],
-  repository: RepositorySnapshot,
-): string {
-  if (solution.submissionStatus && solution.submissionStatus !== 'unknown') {
-    return submissionStatusLabel(solution);
-  }
-  const remote = repository.gitRemote ?? '원격';
-  switch (solution.gitStatus) {
-    case 'checking':
-      return '푸시 상태 확인 중';
-    case 'pushed':
-      return `${remote}`;
-    case 'unpushed':
-      return `push 되지 않음`;
-    case 'unknown':
-      return '푸시 상태 확인 불가';
-  }
-}
-
-/** 제출 단계와 PR 번호를 사용자에게 보여줄 문구로 변환합니다. */
-export function submissionStatusLabel(solution: SolutionFileSnapshot): string {
-  switch (solution.submissionStatus) {
-    case 'checking':
-      return '제출 상태 확인 중';
-    case 'working':
-      return '작성 중';
-    case 'staged':
-      return '커밋 준비';
-    case 'staged-outdated':
-      return '추가 수정 있음';
-    case 'push-needed':
-      return 'push 필요';
-    case 'pr-needed':
-      return 'PR 필요';
-    case 'pr-open':
-      return solution.pullRequestNumber
-        ? `PR #${solution.pullRequestNumber} 진행 중`
-        : 'PR 진행 중';
-    case 'merged':
-      return '병합 완료';
-    case 'sync-needed':
-      return '동기화 후 확인';
-    case 'conflict':
-      return '충돌 확인 필요';
-    case 'unknown':
-    case undefined:
-      return '상태 확인 불가';
-  }
-}
-
-/** 풀이 파일의 상태를 툴팁과 접근성 설명에 사용할 문장으로 반환합니다. */
-export function gitStatusTitle(
-  solution: ProblemSnapshot['solutions'][number],
-  repository: RepositorySnapshot,
-): string {
-  if (solution.submissionStatus && solution.submissionStatus !== 'unknown') {
-    return `${solution.name}: ${submissionStatusLabel(solution)}`;
-  }
-  const remote = repository.gitRemote ?? '원격 저장소';
-  switch (solution.gitStatus) {
-    case 'checking':
-      return `${solution.name}의 푸시 상태를 확인하고 있습니다.`;
-    case 'pushed':
-      return `${solution.name}의 로컬 변경이 모두 ${remote}에 반영되어 있습니다.`;
-    case 'unpushed':
-      return `${solution.name}에 ${remote}으로 보내지 않은 로컬 변경이 있습니다.`;
-    case 'unknown':
-      return 'Git 저장소 또는 현재 브랜치의 upstream을 확인할 수 없습니다.';
-  }
-}
-
-/** 닉네임과 워크스페이스 신뢰 상태에 따라 풀이 생성 안내를 반환합니다. */
-export function creationHint(state: ExtensionSnapshot): string {
-  if (!state.nickname) {
-    return '닉네임 설정 후 생성';
-  }
-  if (!state.workspaceTrusted) {
-    return '워크스페이스 신뢰 후 생성';
-  }
-  return '카드를 눌러 생성';
-}
-
-/** 풀이 파일명에서 언어 표시용 확장자를 추출합니다. */
-export function solutionExtension(fileName: string): string {
-  const lastDot = fileName.lastIndexOf('.');
-  return lastDot === -1 ? fileName : fileName.slice(lastDot);
-}
-
-/** 추가·해제를 제공할 수 있는 로컬 제출 상태인지 판별합니다. */
-export function canToggleStage(status: SolutionSubmissionStatus | undefined): boolean {
-  return status === 'working' || status === 'staged' || status === 'staged-outdated';
-}
-
-/** 신뢰·포크·주차 상태에 따라 스테이징을 막는 사유를 반환합니다. 기존 스테이징 해제는 허용합니다. */
-export function stageDisabledReason(
-  repository: RepositorySnapshot,
-  week: number | undefined,
-  state: ExtensionSnapshot,
-  solution: SolutionFileSnapshot,
-): string | undefined {
-  if (!state.workspaceTrusted) {
-    return '워크스페이스를 신뢰한 뒤 커밋에 추가할 수 있습니다.';
-  }
-  const submission = repository.submission;
-  if (submission?.fork.status !== 'verified') {
-    return submission?.fork.reason ?? 'DaleStudy 포크에서만 제출 기능을 사용할 수 있습니다.';
-  }
-  const staged =
-    solution.submissionStatus === 'staged' || solution.submissionStatus === 'staged-outdated';
-  if (staged) {
-    return undefined;
-  }
-  if (submission.blockedReason) {
-    return submission.blockedReason;
-  }
-  if (
-    week !== undefined &&
-    submission.activeSubmissionWeek !== undefined &&
-    submission.activeSubmissionWeek !== week
-  ) {
-    return `Week ${submission.activeSubmissionWeek} 제출을 먼저 완료해 주세요.`;
-  }
-  return undefined;
 }

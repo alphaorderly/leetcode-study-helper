@@ -23,13 +23,17 @@ const ui: UiState = {
   commitMessages: {},
   ...vscode.getState(),
 };
+
 const renderer = root
   ? new WebviewRenderer(root, ui, (message) => vscode.postMessage(message))
   : undefined;
 let state: ExtensionSnapshot | undefined;
 let requestedProblemSlug: string | undefined;
 
-/** 현재 문제 탭의 대기 상태에서 slug별 중복을 막아 설명 로딩을 요청합니다. */
+/**
+ * 현재 문제 탭이 열렸고 설명이 idle일 때만 호스트에 로딩을 요청합니다.
+ * 응답이 돌아오기 전 같은 slug의 중복 요청을 막으며 실제 설명 캐시는 호스트 세션이 소유합니다.
+ */
 function requestProblemIfNeeded(): void {
   const currentProblem = state?.currentProblem;
   if (

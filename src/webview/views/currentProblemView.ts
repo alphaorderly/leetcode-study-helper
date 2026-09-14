@@ -1,15 +1,18 @@
 import DOMPurify from 'dompurify';
 import type { CurrentProblemSnapshot } from '../../shared/contracts';
+import { actionButton } from '../components/controls';
 import { element, renderLoadingState } from '../components/dom';
 import { difficultyClass, difficultyLabel } from '../state/problemViewModel';
+import { problemDetailView, pythonRunnerView } from '../state/currentProblemModel';
 import type { PostMessage } from '../state/viewTypes';
 
 /** LeetCode 문제 페이지 열기 메시지를 보내는 버튼을 생성합니다. */
 function renderProblemPageButton(slug: string, label: string, post: PostMessage): HTMLElement {
-  const button = element('button', 'problem-page-button', label);
-  button.type = 'button';
-  button.addEventListener('click', () => post({ type: 'openProblem', slug }));
-  return button;
+  return actionButton({
+    className: 'problem-page-button',
+    label,
+    onClick: () => post({ type: 'openProblem', slug }),
+  });
 }
 
 /** 출력이 있을 때만 접을 수 있는 진단 출력 영역을 만듭니다. */
@@ -27,12 +30,12 @@ function renderPythonRunner(
   currentProblem: CurrentProblemSnapshot,
   post: PostMessage,
 ): HTMLElement {
-  const runner = currentProblem.runner;
+  const view = pythonRunnerView(currentProblem.runner);
   const section = element('section', 'python-runner');
   section.setAttribute('aria-label', '로컬 Python 풀이 테스트');
   section.append(element('h3', 'runner-title', '로컬 Python 풀이 테스트'));
 
-  if (runner.status === 'checking') {
+  if (view.kind === 'checking') {
     section.append(
       renderLoadingState(
         '풀이 후보를 분석하는 중…',
@@ -42,23 +45,16 @@ function renderPythonRunner(
     );
     return section;
   }
-  if (runner.status === 'unavailable') {
-    const state = element('p', 'runner-state runner-unavailable', runner.reason);
-    if (runner.missingObjects?.length) {
-      state.dataset.missingObjects = runner.missingObjects.join(',');
+  if (view.kind === 'unavailable') {
+    const state = element('p', 'runner-state runner-unavailable', view.reason);
+    if (view.missingObjects?.length) {
+      state.dataset.missingObjects = view.missingObjects.join(',');
     }
     section.append(state);
     return section;
   }
-
-  if (!runner.candidates || runner.candidates.length === 0) {
-    section.append(
-      element(
-        'p',
-        'runner-state runner-error',
-        runner.status === 'error' ? runner.message : '실행할 풀이 후보가 없습니다.',
-      ),
-    );
+  if (view.kind === 'no-candidates') {
+    section.append(element('p', 'runner-state runner-error', view.message));
     return section;
   }
 
@@ -67,26 +63,23 @@ function renderPythonRunner(
   label.htmlFor = 'runner-candidate';
   const select = element('select', 'select-input runner-candidate');
   select.id = 'runner-candidate';
-  for (const candidate of runner.candidates) {
+  for (const candidate of view.candidates) {
     const option = element('option', undefined, candidate.label);
     option.value = candidate.id;
-    option.selected = candidate.id === runner.selectedCandidateId;
+    option.selected = candidate.id === view.selectedCandidateId;
     select.append(option);
   }
-  const runButton = element(
-    'button',
-    'primary-button runner-button',
-    runner.status === 'running' ? '실행 중…' : '테스트 실행',
-  );
-  runButton.type = 'button';
-  runButton.disabled = runner.status === 'running';
-  runButton.addEventListener('click', () => {
-    post({ type: 'runCurrentSolution', candidateId: select.value });
+  const runButton = actionButton({
+    className: 'primary-button runner-button',
+    label: view.runLabel,
+    disabled: view.running,
+    onClick: () => post({ type: 'runCurrentSolution', candidateId: select.value }),
   });
   controls.append(label, select, runButton);
   section.append(controls);
 
-  if (runner.status === 'running') {
+  const result = view.result;
+  if (result?.kind === 'running') {
     section.append(
       renderLoadingState(
         '테스트를 실행하는 중…',
@@ -94,36 +87,26 @@ function renderPythonRunner(
         'loading-state-compact runner-state runner-running',
       ),
     );
-  } else if (runner.status === 'passed') {
-    section.append(
-      element(
-        'p',
-        'runner-state runner-passed',
-        `${runner.passed}/${runner.total}개 테스트 통과 · ${runner.durationMs}ms`,
-      ),
-    );
-  } else if (runner.status === 'failed') {
-    const failure = element(
-      'div',
-      'runner-state runner-failed',
-      `${runner.failedCase}번째 테스트 실패 · ${runner.passed}/${runner.total}개 통과 · ${runner.durationMs}ms`,
-    );
-    if (runner.assertion) {
-      failure.append(element('pre', 'runner-assertion', runner.assertion));
+  } else if (result?.kind === 'passed') {
+    section.append(element('p', 'runner-state runner-passed', result.text));
+  } else if (result?.kind === 'failed') {
+    const failure = element('div', 'runner-state runner-failed', result.text);
+    if (result.assertion) {
+      failure.append(element('pre', 'runner-assertion', result.assertion));
     }
     section.append(failure);
-  } else if (runner.status === 'error') {
-    const message = runner.testCase
-      ? `${runner.testCase}번째 테스트 실행 중 오류: ${runner.message}`
-      : runner.message;
-    section.append(element('p', 'runner-state runner-error', message));
-    if (runner.traceback) {
-      section.append(renderRunnerOutput('오류 상세', runner.traceback)!);
+  } else if (result?.kind === 'error') {
+    section.append(element('p', 'runner-state runner-error', result.text));
+    if (result.traceback) {
+      const traceback = renderRunnerOutput('오류 상세', result.traceback);
+      if (traceback) {
+        section.append(traceback);
+      }
     }
   }
 
-  const stdout = renderRunnerOutput('표준 출력', 'stdout' in runner ? runner.stdout : undefined);
-  const stderr = renderRunnerOutput('오류 출력', 'stderr' in runner ? runner.stderr : undefined);
+  const stdout = renderRunnerOutput('표준 출력', view.stdout);
+  const stderr = renderRunnerOutput('오류 출력', view.stderr);
   if (stdout) {
     section.append(stdout);
   }
@@ -141,33 +124,29 @@ function renderCurrentProblemDetail(
   post: PostMessage,
 ): DocumentFragment {
   const fragment = document.createDocumentFragment();
+  const view = problemDetailView(currentProblem);
 
-  if (currentProblem.status === 'idle' || currentProblem.status === 'loading') {
-    fragment.append(
-      renderLoadingState(
-        '문제 내용을 불러오는 중…',
-        'LeetCode에서 문제 정보와 본문을 가져오고 있습니다.',
-        'loading-state-panel',
-      ),
-    );
+  if (view.kind === 'loading') {
+    fragment.append(renderLoadingState(view.title, view.description, 'loading-state-panel'));
     return fragment;
   }
 
-  if (currentProblem.status === 'error') {
+  if (view.kind === 'error') {
     const state = element('div', 'problem-detail-state problem-detail-error');
     state.append(
-      element('p', undefined, currentProblem.message),
-      renderProblemPageButton(currentProblem.slug, 'LeetCode에서 열기', post),
+      element('p', undefined, view.message),
+      renderProblemPageButton(view.slug, 'LeetCode에서 열기', post),
+      actionButton({
+        className: 'secondary-button',
+        label: '다시 시도',
+        onClick: () => post({ type: 'loadCurrentProblem' }),
+      }),
     );
-    const retry = element('button', 'secondary-button', '다시 시도');
-    retry.type = 'button';
-    retry.addEventListener('click', () => post({ type: 'loadCurrentProblem' }));
-    state.append(retry);
     fragment.append(state);
     return fragment;
   }
 
-  const { detail } = currentProblem;
+  const { detail } = view;
   const header = element('header', 'problem-detail-header');
   const titleRow = element('div', 'problem-detail-title-row');
   titleRow.append(
@@ -188,7 +167,7 @@ function renderCurrentProblemDetail(
   header.append(titleRow, metadata);
   fragment.append(header);
 
-  if (detail.isPaidOnly || !detail.content) {
+  if (view.hideContent) {
     fragment.append(
       element(
         'p',
@@ -202,7 +181,7 @@ function renderCurrentProblemDetail(
   const content = element('div', 'problem-detail-content');
   let sanitized = sanitizedProblemContent.get(detail);
   if (sanitized === undefined) {
-    sanitized = DOMPurify.sanitize(detail.content, {
+    sanitized = DOMPurify.sanitize(detail.content ?? '', {
       FORBID_TAGS: [
         'script',
         'style',
@@ -235,7 +214,11 @@ function problemDetailIdentity(currentProblem: CurrentProblemSnapshot): unknown 
   return `${currentProblem.slug}:${currentProblem.status}:${currentProblem.status === 'error' ? currentProblem.message : ''}`;
 }
 
-/** 문제 설명과 실행 결과 영역을 나누어 실행 상태만 바뀔 때 설명 DOM을 재사용합니다. */
+/**
+ * 현재 풀이 URI와 설명 identity를 보관하는 브라우저 렌더러입니다.
+ * 같은 풀이의 러너만 바뀌면 설명 DOM은 유지하고, 파일이 바뀌면 두 영역을 새로 만듭니다.
+ * 본문 HTML은 정화한 결과를 사용하며 설명 객체가 같은 동안 정화 결과도 재사용합니다.
+ */
 export class CurrentProblemViewRenderer {
   private uri: string | undefined;
   private section: HTMLElement | undefined;

@@ -37,9 +37,18 @@ export interface FixLineEndingsResult {
   fixed: number;
 }
 
-/** 풀이 파일의 생성·휴지통 삭제·파일 끝 개행 수정을 담당합니다. */
+/**
+ * StudyController가 검증한 대상에 실제 파일 쓰기를 수행하는 서비스입니다.
+ * 확인 창과 파일 시스템 접근을 담당하며 목록 갱신·편집기 열기는 컨트롤러에 남깁니다.
+ * 워크스페이스 신뢰와 대상이 현재 목록에 속하는지는 호출자가 먼저 확인해야 합니다.
+ */
 export class SolutionFileService {
-  /** 이름과 언어를 검증해 빈 풀이를 만듭니다. 기존 파일은 그대로 반환하고 대소문자 충돌은 거부합니다. */
+  /**
+   * 파일명을 검증하고 디렉터리에서 존재 여부를 확인한 뒤 빈 파일을 기록합니다.
+   * 발견한 기존 파일은 exists로 반환하며 대소문자만 다른 이름은 오류입니다.
+   * confirm이 true일 때만 생성 확인을 표시하고 취소는 cancelled로 반환합니다.
+   * @throws 잘못된 닉네임·언어, 대소문자 충돌 또는 파일 시스템 읽기·쓰기 실패.
+   */
   async create(request: CreateSolutionRequest): Promise<CreateSolutionResult> {
     if (!isValidNickname(request.nickname)) {
       throw new Error('닉네임에는 영문, 숫자, 하이픈만 사용할 수 있습니다.');
@@ -121,7 +130,11 @@ export class SolutionFileService {
     return { status: 'deleted' };
   }
 
-  /** 수정할 풀이에 미저장 문서가 없는지 확인한 뒤 필요한 파일만 기록합니다. */
+  /**
+   * 대상 전체의 미저장 문서를 먼저 확인한 다음 파일을 순서대로 읽고 필요한 개행만 기록합니다.
+   * 실행 중 파일 오류가 발생하면 오류를 전달하며 이미 수정한 앞선 파일을 되돌리지는 않습니다.
+   * Markdown 제외와 URI 중복 제거는 호출자가 수행합니다.
+   */
   async fixLineEndings(uris: readonly vscode.Uri[]): Promise<FixLineEndingsResult> {
     const targetUris = new Set(uris.map((uri) => uri.toString()));
     const dirtyDocument = vscode.workspace.textDocuments.find(

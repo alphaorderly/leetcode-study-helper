@@ -219,7 +219,11 @@ export function githubRequestNeedsSignIn(error: unknown): boolean {
   return error instanceof GitHubRequestError && error.needsSignIn;
 }
 
-/** GitHub API로 포크 신원과 주차별 PR·변경 파일을 조회하고 유효 기간 동안 캐시합니다. */
+/**
+ * 포크 신원, 주차 PR·비교 결과, 공식 파일 트리를 GitHub API에서 읽습니다.
+ * 완료 결과를 30초 동안 캐시하며 제출 캐시는 요청 브랜치별로 분리합니다.
+ * 쓰기 기능은 없고, Git 작업 후 clearSubmissionCache 또는 인증 변경 후 clearCaches를 호출합니다.
+ */
 export class GitHubSubmissionClient {
   private readonly forkIdentityCache = new Map<string, CachedRemoteValue<ForkIdentitySnapshot>>();
   private readonly remoteSubmissionCache = new Map<
@@ -228,7 +232,9 @@ export class GitHubSubmissionClient {
   >();
   private canonicalTreeCache: CachedRemoteValue<CanonicalFileTree> | undefined;
 
-  /** 토큰 공급자와 요청 구현을 주입받아 GitHub 조회에 사용합니다. */
+  /**
+   * 비동기 토큰 공급자를 보관합니다. 생략하면 인증 없이 조회하며 HTTP 요청은 전역 fetch를 사용합니다.
+   */
   constructor(
     private readonly getAccessToken: () => Promise<string | undefined> = async () => undefined,
   ) {}
@@ -284,7 +290,13 @@ export class GitHubSubmissionClient {
     }
   }
 
-  /** 주차 브랜치별 비교 결과와 PR 상태를 조회합니다. 불완전한 비교 결과는 표시해 제출을 차단할 수 있게 합니다. */
+  /**
+   * 공식 main 비교와 포크의 주차 PR을 조회하여 표시·검증에 필요한 원격 정보를 모읍니다.
+   * 호출자의 브랜치보다 단 하나의 열린 PR을 우선합니다. PR이 없으면 요청한 브랜치를 사용합니다.
+   * 캐시는 요청한 브랜치별로 분리하며 force이면 우회합니다. 진행 중 Promise는 공유하지 않습니다.
+   * 비교 API의 파일·커밋 한도에 도달하면 compareIncomplete로 표시하고 호출자가 제출을 차단합니다.
+   * @throws 인증·네트워크·목록 조회 실패. 공식 파일 트리 조회 실패만 선택적 정보 부재로 처리합니다.
+   */
   async getRemoteSubmission(
     remote: ParsedGitHubRemote,
     headBranch: string | undefined,
@@ -307,6 +319,7 @@ export class GitHubSubmissionClient {
       (pullRequest) =>
         belongsToFork(pullRequest, remote) && isWeekBranch(pullRequestBranch(pullRequest)),
     );
+    // 열린 주차 PR이 하나라면 요청한 주차보다 그 PR을 우선해 중복 제출을 방지합니다.
     const resolvedHeadBranch =
       openPullRequests.length === 1 ? pullRequestBranch(openPullRequests[0]!) : headBranch;
     const activePullRequest = resolvedHeadBranch
@@ -314,27 +327,18 @@ export class GitHubSubmissionClient {
           (pullRequest) => pullRequestBranch(pullRequest) === resolvedHeadBranch,
         )
       : undefined;
-    const compare = resolvedHeadBranch
-      ? await this.githubJsonOptional<GitHubCompareResponse>(
-          `/repos/${CANONICAL_FULL_NAME}/compare/main...${encodeURIComponent(remote.owner)}:${encodeURIComponent(resolvedHeadBranch)}`,
-        )
-      : undefined;
-    const latestPullRequest =
-      activePullRequest ??
-      (resolvedHeadBranch
-        ? (
-            await this.githubJson<GitHubPullRequest[]>(
-              `/repos/${CANONICAL_FULL_NAME}/pulls?state=all&base=main&head=${encodeURIComponent(`${remote.owner}:${resolvedHeadBranch}`)}&sort=updated&direction=desc&per_page=1`,
-            )
-          )[0]
-        : undefined);
-    const pullRequestFiles = latestPullRequest
-      ? (
-          await this.githubPagedJson<GitHubPullFile>(
-            `/repos/${CANONICAL_FULL_NAME}/pulls/${latestPullRequest.number}/files`,
-          )
-        ).map(({ filename }) => filename)
-      : [];
+    let compare: GitHubCompareResponse | undefined;
+    if (resolvedHeadBranch) {
+      compare = await this.githubJsonOptional<GitHubCompareResponse>(
+        `/repos/${CANONICAL_FULL_NAME}/compare/main...${encodeURIComponent(remote.owner)}:${encodeURIComponent(resolvedHeadBranch)}`,
+      );
+    }
+    const latestPullRequest = await this.findLatestPullRequest(
+      remote,
+      resolvedHeadBranch,
+      activePullRequest,
+    );
+    const pullRequestFiles = await this.readPullRequestFiles(latestPullRequest);
     const value: RemoteSubmissionState = {
       headBranch: resolvedHeadBranch,
       compareFiles: compare?.files ?? [],
@@ -359,6 +363,31 @@ export class GitHubSubmissionClient {
     return value;
   }
 
+  /** 열린 PR을 우선 사용합니다. 없을 때만 선택한 브랜치의 마지막 갱신 PR을 조회하며, 브랜치도 없으면 요청하지 않습니다. */
+  private async findLatestPullRequest(
+    remote: ParsedGitHubRemote,
+    headBranch: string | undefined,
+    active: GitHubPullRequest | undefined,
+  ): Promise<GitHubPullRequest | undefined> {
+    if (active) return active;
+    if (!headBranch) return undefined;
+    const pulls = await this.githubJson<GitHubPullRequest[]>(
+      `/repos/${CANONICAL_FULL_NAME}/pulls?state=all&base=main&head=${encodeURIComponent(`${remote.owner}:${headBranch}`)}&sort=updated&direction=desc&per_page=1`,
+    );
+    return pulls[0];
+  }
+
+  /** 열린 PR뿐 아니라 최근 닫힌 PR의 파일도 읽어 병합·종료 화면의 주차를 판단할 수 있게 합니다. */
+  private async readPullRequestFiles(
+    pullRequest: GitHubPullRequest | undefined,
+  ): Promise<string[]> {
+    if (!pullRequest) return [];
+    const files = await this.githubPagedJson<GitHubPullFile>(
+      `/repos/${CANONICAL_FULL_NAME}/pulls/${pullRequest.number}/files`,
+    );
+    return files.map(({ filename }) => filename);
+  }
+
   /** 제출 작업 이후 브랜치 비교와 공식 파일 캐시를 무효화합니다. */
   clearSubmissionCache(): void {
     this.remoteSubmissionCache.clear();
@@ -371,7 +400,9 @@ export class GitHubSubmissionClient {
     this.clearSubmissionCache();
   }
 
-  /** GitHub 요청에 사용할 비동기 토큰 공급자를 보관합니다. */
+  /**
+   * 조회기가 소유한 세 캐시를 비웁니다. 외부 토큰 공급자의 수명은 소유자가 관리합니다.
+   */
   dispose(): void {
     this.clearCaches();
   }

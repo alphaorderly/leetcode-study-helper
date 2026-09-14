@@ -1264,6 +1264,14 @@ describe('GitStatusService submission actions', () => {
       }),
     );
     expect(repository.push).toHaveBeenCalledWith('origin', 'week-01', true);
+    // 최종 fetch와 status는 실제 push보다 앞서 완료되어야 합니다.
+    expect(repository.fetch.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      repository.push.mock.invocationCallOrder[0]!,
+    );
+    expect(repository.status.mock.invocationCallOrder.at(-2)).toBeLessThan(
+      repository.push.mock.invocationCallOrder[0]!,
+    );
+
     service.dispose();
   });
 
@@ -1499,7 +1507,11 @@ describe('GitStatusService submission actions', () => {
     service.dispose();
   });
 
-  it('aborts push when HEAD changes during remote validation', async () => {
+  it.each([
+    ['HEAD', 'push 직전에 브랜치 또는 HEAD가 변경'],
+    ['remote', 'push 직전에 origin/week-01 상태가 변경'],
+    ['origin', 'origin URL이 변경'],
+  ])('aborts push when %s changes during the final fetch', async (changed, message) => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
     repository.state.HEAD.name = 'week-01';
     repository.state.HEAD.commit = 'local-tip';
@@ -1517,7 +1529,15 @@ describe('GitStatusService submission actions', () => {
       if (options?.remote === 'origin') {
         originFetches += 1;
         if (originFetches === 2) {
-          repository.state.HEAD.commit = 'changed-externally';
+          if (changed === 'HEAD') repository.state.HEAD.commit = 'changed-externally';
+          if (changed === 'remote')
+            repository.state.refs.push({
+              name: 'origin/week-01',
+              commit: 'external',
+              remote: 'origin',
+            });
+          if (changed === 'origin')
+            repository.state.remotes[0]!.pushUrl = 'git@github.com:CaseUser/leetcode-study.git';
         }
       }
     });
@@ -1532,7 +1552,7 @@ describe('GitStatusService submission actions', () => {
           week: 1,
         },
       ]),
-    ).rejects.toThrow('push 직전에 브랜치 또는 HEAD가 변경');
+    ).rejects.toThrow(message);
 
     expect(repository.push).not.toHaveBeenCalled();
     service.dispose();

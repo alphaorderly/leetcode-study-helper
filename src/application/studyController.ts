@@ -28,7 +28,13 @@ import { SolutionFileService } from '../infrastructure/workspace/solutionFileSer
 
 const CONFIGURATION_SECTION = 'leetcodeStudyHelper';
 
-/** 설정과 사용자 명령을 조율하고 저장소·현재 문제 세션의 상태를 웹뷰에 전달합니다. */
+/**
+ * 확장 진입점이 생성하며 웹뷰 명령과 VS Code 명령이 함께 사용하는 조율자입니다.
+ * 설정·사용자 선택·전체 스냅샷을 소유하고, 탐색·취소의 수명 관리는 두 세션에 위임합니다.
+ * 전체 변경과 현재 문제 변경을 다른 이벤트로 보내 제출 입력과 목록 DOM을 보존합니다.
+ * 여기서 하는 사전 확인은 사용자 안내용이며 실제 Git 쓰기 검증은 서비스가 다시 수행합니다.
+ * dispose는 소유한 서비스·세션과 이벤트 구독을 함께 해제합니다.
+ */
 export class StudyController implements vscode.Disposable {
   private readonly gitStatusService = new GitStatusService();
   private readonly repositoryService = new StudyRepositoryService();
@@ -100,7 +106,11 @@ export class StudyController implements vscode.Disposable {
     return this.initialized ? this.snapshot : this.refresh();
   }
 
-  /** 설정을 다시 읽고 저장소 목록을 갱신합니다. Git 상태는 세션에서 후속 갱신합니다. */
+  /**
+   * 설정을 스냅샷에 반영하고 전체 파일 탐색을 요청합니다.
+   * 반환 시 파일 목록은 준비되지만 Git 후속 조회는 아직 진행 중일 수 있습니다.
+   * 세션 이벤트에서 이미 게시한 배열은 다시 게시하지 않아 중복 렌더링을 줄입니다.
+   */
   async refresh(): Promise<ExtensionSnapshot> {
     const nickname = this.prepareRefreshSettings();
     const repositoryState = await this.repositoryRefreshSession.refresh(nickname);
@@ -308,7 +318,11 @@ export class StudyController implements vscode.Disposable {
     return result.uri.toString();
   }
 
-  /** Markdown을 제외한 내 풀이의 파일 끝 개행을 정리합니다. 저장하지 않은 문서가 있으면 중단합니다. */
+  /**
+   * 현재 목록의 내 풀이 URI를 중복 제거하고 Markdown을 제외해 줄 끝을 보정합니다.
+   * 파일 내용이 바뀌는 작업입니다. 대상 중 저장하지 않은 문서가 하나라도 있으면
+   * 서비스가 쓰기 시작 전에 중단하고 오류를 전달합니다.
+   */
   async fixAllSolutions(): Promise<LineLintFixResult> {
     if (!vscode.workspace.isTrusted) {
       throw new Error('풀이 파일을 수정하려면 먼저 워크스페이스를 신뢰해야 합니다.');
@@ -508,7 +522,11 @@ export class StudyController implements vscode.Disposable {
     return nickname;
   }
 
-  /** 저장소 상태를 현재 문제 세션과 전체 스냅샷에 반영하고 변경을 발행합니다. */
+  /**
+   * 새 저장소 목록으로 현재 풀이 선택부터 맞춘 다음 전체 상태를 게시합니다.
+   * setRepositories가 현재 문제 변경 이벤트를 동기적으로 발생시킬 수 있으므로
+   * 최종 스냅샷에는 세션이 갱신한 currentSnapshot을 사용합니다.
+   */
   private publishRepositoryState(state: RepositoryRefreshState): void {
     this.currentProblemSession.setRepositories(state.repositories);
     this.snapshot = {
@@ -586,7 +604,12 @@ export class StudyController implements vscode.Disposable {
     }
   }
 
-  /** 화면 상태를 기준으로 명령의 사전 조건을 확인합니다. 실제 Git 쓰기 검증은 서비스가 다시 수행합니다. */
+  /**
+   * 화면에서 알고 있는 포크와 제출 상태로 명령의 사전 조건을 확인합니다.
+   * 이 결과를 장기 보관하거나 Git 쓰기의 유일한 근거로 사용하지 않습니다.
+   * @param allowBlocked 스테이징 해제·복구 등 차단 상태에서도 필요한 명령인지 여부.
+   * @throws 등록되지 않은 저장소, 확인되지 않은 포크 또는 허용되지 않은 차단 상태.
+   */
   private requireSubmissionRepository(rootUri: string, allowBlocked = false): RepositorySnapshot {
     const repository = this.snapshot.repositories.find((item) => item.rootUri === rootUri);
     if (!repository) {

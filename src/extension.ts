@@ -4,7 +4,11 @@ import { StudyWebviewProvider } from './webview/host/studyWebviewProvider';
 
 const VIEW_ID = 'leetcodeStudyHelper.explorer';
 
-/** 확장 서비스와 명령을 등록하고 해제할 리소스를 확장 컨텍스트에 연결합니다. */
+/**
+ * VS Code 확장 호스트의 시작점입니다. 컨트롤러와 웹뷰 제공자를 한 번 구성하고
+ * 사용자 명령·내부 테스트 명령을 같은 컨트롤러에 연결합니다. 실제 최초 탐색은 getState/refresh에서
+ * 시작합니다. 소유 리소스는 context.subscriptions에 등록해 확장 종료 때 해제합니다.
+ */
 export function activate(context: vscode.ExtensionContext): void {
   const controller = new StudyController(context.extensionUri, context.globalState);
   const provider = new StudyWebviewProvider(context.extensionUri, controller);

@@ -58,7 +58,11 @@ function parseDataset(value: unknown): DatasetFile {
   };
 }
 
-/** 확장에 포함된 Python 테스트 데이터셋을 읽고 검증한 결과를 공유합니다. */
+/**
+ * 확장 리소스의 JSON 테스트 데이터를 최초 요청 때 한 번 읽는 서비스입니다.
+ * 동시 요청은 같은 Promise를 공유하고 읽기·검증 실패 시 캐시를 비워 재시도합니다.
+ * 문제 누락은 undefined이며 파일 자체의 손상·읽기 실패는 오류입니다. 테스트 코드는 여기서 실행하지 않습니다.
+ */
 export class LeetCodeTestDataService {
   private data: Promise<DatasetFile> | undefined;
 

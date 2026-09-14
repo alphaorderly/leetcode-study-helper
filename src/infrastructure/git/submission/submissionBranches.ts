@@ -9,7 +9,11 @@ import { type SubmissionSolution } from './submissionFiles';
 import type { SubmissionGuards } from './submissionGuards';
 import { type GitRepository, relativeChangePaths } from '../vscodeGit';
 
-/** 공식 main 동기화와 주차 브랜치 전환을 수행하며 각 쓰기 경계에서 상태를 재검증합니다. */
+/**
+ * 제출 명령이 필요로 하는 공식 main 동기화와 주차 브랜치 전환을 담당합니다.
+ * require로 시작하는 일부 메서드도 fetch·remote 추가·병합·push를 수행하므로
+ * 읽기 전용 조회에서 호출하지 않습니다. 각 메서드의 쓰기 여부와 순서를 확인해야 합니다.
+ */
 export class SubmissionBranches {
   /** 주차 브랜치 작업에 필요한 GitHub 조회기와 Git 상태 검증기를 보관합니다. */
   constructor(
@@ -71,6 +75,39 @@ export class SubmissionBranches {
     await repository.fetch({ remote: 'origin', ref: 'main', prune: true });
     await repository.fetch({ remote: canonicalRemote, ref: 'main', prune: true });
     await repository.status();
+    await this.revalidateForkSync(
+      repository,
+      verifiedOrigin,
+      expectedHead,
+      canonicalMain,
+      canonicalCommit,
+    );
+    if (!repository.state.HEAD?.upstream) {
+      await repository.setBranchUpstream('main', 'origin/main');
+    }
+    try {
+      await repository.push('origin', 'main', false);
+    } catch (error) {
+      await repository.status();
+      const recovery = await this.describeSyncRecovery(repository);
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`origin/main push에 실패했습니다. ${recovery} (${detail})`, {
+        cause: error,
+      });
+    }
+    await repository.status();
+    this.githubClient.clearSubmissionCache();
+    return canonicalMain;
+  }
+
+  /** 병합 후 두 remote를 다시 fetch한 시점에 검사합니다. 병합 전의 허용 판단을 재사용하면 외부 변경을 놓칩니다. */
+  private async revalidateForkSync(
+    repository: GitRepository,
+    verifiedOrigin: ParsedGitHubRemote,
+    expectedHead: string,
+    canonicalMain: string,
+    canonicalCommit: string,
+  ): Promise<void> {
     this.guards.requireCleanOperationState(repository);
     this.guards.requireUnchangedOrigin(repository, verifiedOrigin);
     if (repository.state.HEAD?.name !== 'main' || repository.state.HEAD.commit !== expectedHead) {
@@ -83,35 +120,30 @@ export class SubmissionBranches {
     if (liveOriginRelation !== 'equal' && liveOriginRelation !== 'ahead') {
       throw new Error('동기화 push 직전에 origin/main이 변경되어 중단했습니다.');
     }
-    if (!repository.state.HEAD?.upstream) {
-      await repository.setBranchUpstream('main', 'origin/main');
-    }
-    try {
-      await repository.push('origin', 'main', false);
-    } catch (error) {
-      await repository.status();
-      let recovery: string;
-      try {
-        const relation = await this.originMainRelation(repository);
-        recovery =
-          relation === 'ahead'
-            ? '로컬 main에는 동기화 결과가 안전하게 남아 있습니다. 네트워크를 확인한 뒤 다시 동기화해 주세요.'
-            : '로컬 main과 origin/main 상태를 확인한 뒤 다시 동기화해 주세요.';
-      } catch {
-        recovery =
-          '로컬 main의 동기화 결과를 보존했습니다. origin/main을 확인한 뒤 다시 시도해 주세요.';
-      }
-      const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`origin/main push에 실패했습니다. ${recovery} (${detail})`, {
-        cause: error,
-      });
-    }
-    await repository.status();
-    this.githubClient.clearSubmissionCache();
-    return canonicalMain;
   }
 
-  /** 새 주차를 시작할 main의 기준을 확인합니다. 필요하면 동기화하므로 읽기 전용 검사가 아닙니다. */
+  /** push 실패 후 로컬 main을 되돌리지 않고, 남아 있는 동기화 결과에 맞는 복구 안내를 선택합니다. */
+  private async describeSyncRecovery(repository: GitRepository): Promise<string> {
+    let recovery: string;
+    try {
+      const relation = await this.originMainRelation(repository);
+      recovery =
+        relation === 'ahead'
+          ? '로컬 main에는 동기화 결과가 안전하게 남아 있습니다. 네트워크를 확인한 뒤 다시 동기화해 주세요.'
+          : '로컬 main과 origin/main 상태를 확인한 뒤 다시 동기화해 주세요.';
+    } catch {
+      recovery =
+        '로컬 main의 동기화 결과를 보존했습니다. origin/main을 확인한 뒤 다시 시도해 주세요.';
+    }
+    return recovery;
+  }
+
+  /**
+   * 주차 브랜치를 만들기 전 main과 origin·공식 main의 관계를 확인합니다.
+   * 공식 remote가 없으면 추가하고 두 remote를 fetch합니다. 뒤처진 상태라면
+   * 작업 파일 조건을 확인해 병합과 push까지 수행할 수 있습니다.
+   * @returns 후속 이력 검사와 브랜치 생성 기준으로 사용할 공식 main ref 이름.
+   */
   async requireSynchronizedMain(
     repository: GitRepository,
     solutions: readonly SubmissionSolution[],

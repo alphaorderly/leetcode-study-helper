@@ -1,4 +1,8 @@
-/** 연속 호출을 마지막 요청 시점 기준의 한 번의 작업으로 모으는 타이머입니다. */
+/**
+ * 마지막 schedule 호출에서 delayMs가 지난 뒤 작업을 한 번 호출하는 debounce 도구입니다.
+ * 예약만 소유하며 비동기 작업의 Promise·취소·오류 처리는 호출자가 담당합니다.
+ * 세션 종료 시 cancel을 호출해야 대기 중 작업이 실행되지 않습니다.
+ */
 export class TrailingTask {
   private timer: ReturnType<typeof setTimeout> | undefined;
 

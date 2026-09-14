@@ -137,21 +137,24 @@ export function buildUnavailableSubmission(
   return { statuses: localStatuses, pullRequestNumbers: new Map(), snapshot };
 }
 
+/** 원격 조회와 실제 작업 파일 검사가 끝난 뒤 화면 상태를 계산할 입력입니다. 쓰기 허가로 재사용하지 않습니다. */
+interface ReadySubmissionInput {
+  fork: ForkIdentitySnapshot;
+  remote: RemoteSubmissionState;
+  remoteCommits: SubmissionCommitSnapshot[];
+  statuses: ReadonlyMap<string, SolutionSubmissionStatus>;
+  pullRequestNumbers: ReadonlyMap<string, number>;
+  hasBlockingOriginCommits: boolean;
+  hasDirtyTrackedState: boolean;
+  hasUntrackedChanges: boolean;
+  rebaseInProgress: boolean;
+  hasCanonicalRemote: boolean;
+}
+
 /** 입출력 없이 조회 결과를 합성합니다. 같은 커밋은 push 완료 정보를 우선합니다. */
 export function buildReadySubmission(
   context: LocalSubmissionContext,
-  input: {
-    fork: ForkIdentitySnapshot;
-    remote: RemoteSubmissionState;
-    remoteCommits: SubmissionCommitSnapshot[];
-    statuses: ReadonlyMap<string, SolutionSubmissionStatus>;
-    pullRequestNumbers: ReadonlyMap<string, number>;
-    hasBlockingOriginCommits: boolean;
-    hasDirtyTrackedState: boolean;
-    hasUntrackedChanges: boolean;
-    rebaseInProgress: boolean;
-    hasCanonicalRemote: boolean;
-  },
+  input: ReadySubmissionInput,
 ): SubmissionStatusResult {
   const {
     fileByPath,
@@ -164,18 +167,7 @@ export function buildReadySubmission(
     local,
     localBlockedReason,
   } = context;
-  const {
-    fork,
-    remote,
-    remoteCommits,
-    statuses,
-    pullRequestNumbers,
-    hasBlockingOriginCommits,
-    hasDirtyTrackedState,
-    hasUntrackedChanges,
-    rebaseInProgress,
-    hasCanonicalRemote,
-  } = input;
+  const { fork, remote, remoteCommits, statuses, pullRequestNumbers, hasCanonicalRemote } = input;
   const submissionBranch = remote.headBranch ?? requestedSubmissionBranch;
   const forkFiles = remote.compareFiles.flatMap(({ filename }) => {
     const file = fileByPath.get(filename);
@@ -184,47 +176,20 @@ export function buildReadySubmission(
   const otherForkFiles = remote.compareFiles
     .map(({ filename }) => filename)
     .filter((filename) => !fileByPath.has(filename));
-  const commitsByHash = new Map<string, SubmissionCommitSnapshot>();
-  for (const commit of [...remoteCommits, ...local.commits]) {
-    const existing = commitsByHash.get(commit.hash);
-    commitsByHash.set(commit.hash, existing?.pushed ? existing : commit);
-  }
-  const commits = [...commitsByHash.values()];
-  const activeFiles = [
-    ...stagedFiles,
-    ...commits.flatMap(({ files: commitFiles }) => commitFiles),
-    ...forkFiles,
-  ];
-  const activeWeeks = new Set(
-    activeFiles.map(({ week }) => week).filter((week): week is number => week !== undefined),
+  const commits = mergeSubmissionCommits(remoteCommits, local.commits);
+  const { activeSubmissionWeek, mixedWeeks } = activeSubmissionScope(
+    stagedFiles,
+    commits,
+    forkFiles,
+    submissionBranch,
   );
-  const activeSubmissionWeek = resolveActiveWeek(activeWeeks, weekFromBranch(submissionBranch));
   const pullRequestWeek = singleWeek(
     remote.pullRequestFiles.flatMap((relativePath) => {
       const file = fileByPath.get(relativePath);
       return file ? [file] : [];
     }),
   );
-  const mixedWeeks = activeWeeks.size > 1;
-  const blocksForkSync = trackedFilesBlockSync(blockingTrackedFiles);
-  const canSync =
-    branch === 'main' && !blocksForkSync && !rebaseInProgress && !hasBlockingOriginCommits;
-  const syncDisabledReason = describeSyncDisabledReason(
-    branch,
-    blockingTrackedFiles,
-    Boolean(rebaseInProgress),
-    hasBlockingOriginCommits,
-  );
-  const latestPullRequestStatus = remote.latestPullRequest
-    ? pullRequestStatus(remote.latestPullRequest)
-    : undefined;
-  const canReturnToMain =
-    currentBranchWeek !== undefined &&
-    latestPullRequestStatus === 'merged' &&
-    !hasDirtyTrackedState &&
-    !hasUntrackedChanges &&
-    !rebaseInProgress &&
-    local.commits.length === 0;
+  const { canSync, syncDisabledReason, canReturnToMain } = submissionPermissions(context, input);
   const branchAllowed =
     branch === 'main' || (currentBranchWeek !== undefined && branch === submissionBranch);
   const hasOtherOpenPullRequest =
@@ -368,4 +333,70 @@ function describeSubmissionBlock({
     return '제출 기능은 main 또는 활성 week-XX 브랜치에서만 사용할 수 있습니다.';
   }
   return undefined;
+}
+
+/** 같은 SHA가 로컬·원격에 모두 있으면 pushed 정보를 우선하며 원래 삽입 순서는 유지합니다. */
+function mergeSubmissionCommits(
+  remoteCommits: SubmissionCommitSnapshot[],
+  localCommits: SubmissionCommitSnapshot[],
+): SubmissionCommitSnapshot[] {
+  const commitsByHash = new Map<string, SubmissionCommitSnapshot>();
+  for (const commit of [...remoteCommits, ...localCommits]) {
+    const existing = commitsByHash.get(commit.hash);
+    commitsByHash.set(commit.hash, existing?.pushed ? existing : commit);
+  }
+  return [...commitsByHash.values()];
+}
+
+/** 스테이징·커밋·포크 파일 전체의 주차를 집계합니다. 파일에 주차가 없을 때만 브랜치 번호로 대체합니다. */
+function activeSubmissionScope(
+  stagedFiles: SubmissionFileSnapshot[],
+  commits: SubmissionCommitSnapshot[],
+  forkFiles: SubmissionFileSnapshot[],
+  submissionBranch: string | undefined,
+) {
+  const activeFiles = [
+    ...stagedFiles,
+    ...commits.flatMap(({ files: commitFiles }) => commitFiles),
+    ...forkFiles,
+  ];
+  const activeWeeks = new Set(
+    activeFiles.map(({ week }) => week).filter((week): week is number => week !== undefined),
+  );
+  return {
+    activeSubmissionWeek: resolveActiveWeek(activeWeeks, weekFromBranch(submissionBranch)),
+    mixedWeeks: activeWeeks.size > 1,
+  };
+}
+
+/** 동기화와 main 복귀는 서로 다른 작업 파일 조건을 사용합니다. 표시용 조건을 실제 쓰기 검증과 혼동하지 않습니다. */
+function submissionPermissions(context: LocalSubmissionContext, input: ReadySubmissionInput) {
+  const { branch, blockingTrackedFiles, currentBranchWeek, local } = context;
+  const {
+    remote,
+    rebaseInProgress,
+    hasBlockingOriginCommits,
+    hasDirtyTrackedState,
+    hasUntrackedChanges,
+  } = input;
+  const blocksForkSync = trackedFilesBlockSync(blockingTrackedFiles);
+  const canSync =
+    branch === 'main' && !blocksForkSync && !rebaseInProgress && !hasBlockingOriginCommits;
+  const syncDisabledReason = describeSyncDisabledReason(
+    branch,
+    blockingTrackedFiles,
+    Boolean(rebaseInProgress),
+    hasBlockingOriginCommits,
+  );
+  const latestPullRequestStatus = remote.latestPullRequest
+    ? pullRequestStatus(remote.latestPullRequest)
+    : undefined;
+  const canReturnToMain =
+    currentBranchWeek !== undefined &&
+    latestPullRequestStatus === 'merged' &&
+    !hasDirtyTrackedState &&
+    !hasUntrackedChanges &&
+    !rebaseInProgress &&
+    local.commits.length === 0;
+  return { canSync, syncDisabledReason, canReturnToMain };
 }

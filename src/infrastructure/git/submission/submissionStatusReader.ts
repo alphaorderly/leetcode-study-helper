@@ -27,14 +27,24 @@ import {
 } from './submissionSnapshot';
 import { addRelativeChangePaths, relativeGitPath, type GitRepository } from '../vscodeGit';
 
-/** 로컬 Git, GitHub, 파일 해시를 순서대로 읽고 순수 상태 조립 함수에 전달합니다. */
+/**
+ * GitStatusService가 호출하는 표시 전용 조회기입니다. 로컬 파일·이력을 먼저 확보하고
+ * 원격 조회를 시도해 GitHub 실패 시에도 이미 읽은 로컬 정보를 보존합니다.
+ * 파일 해시 일치 여부와 조회 결과를 순수 함수에 넘겨 화면 스냅샷을 만듭니다.
+ * 이 경로에서는 remote 추가·브랜치 전환·push를 하지 않습니다.
+ */
 export class SubmissionStatusReader {
   private readonly history = new SubmissionHistory();
 
   /** 원격 제출 상태 조회에 사용할 GitHub 클라이언트를 보관합니다. */
   constructor(private readonly githubClient: GitHubSubmissionClient) {}
 
-  /** 원격 오류가 발생해도 이미 읽은 로컬 제출 정보를 반환합니다. */
+  /**
+   * 로컬 정보 → 포크 확인 → 원격 상태 → 파일 일치·커밋 조회 → 스냅샷 조립 순서입니다.
+   * 포크 미지원·원격 조회 실패는 로컬 상태를 포함한 표시 결과로 반환합니다.
+   * 로컬 수집 자체의 예외는 상위 GitStatusService가 처리합니다.
+   * @param forceRemote 원격 캐시를 우회할지 여부. 실제 Git status 갱신은 호출자가 담당합니다.
+   */
   async read(
     repository: GitRepository,
     solutions: readonly SubmissionSolution[],
@@ -127,7 +137,11 @@ export class SubmissionStatusReader {
     });
   }
 
-  /** 원격 요청을 보내기 전에 로컬 경로, 주차와 미푸시 이력을 수집합니다. */
+  /**
+   * 파일 URI를 저장소 상대 경로로 바꾸고 index·작업 파일·충돌·이력을 한 조회 문맥으로 묶습니다.
+   * 현재 week 브랜치를 우선하고, main 등에서는 스테이징 파일의 단일 주차로 제출 브랜치를 추론합니다.
+   * 공식 remote 탐색 실패는 이름 부재로 남겨 로컬 이력의 대체 기준을 선택할 수 있게 합니다.
+   */
   private async readLocalState(
     repository: GitRepository,
     solutions: readonly SubmissionSolution[],

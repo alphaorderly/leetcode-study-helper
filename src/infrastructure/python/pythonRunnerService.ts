@@ -67,7 +67,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** 러너 응답의 객체 여부와 ok 판별자를 확인하며 상세 필드는 호출 단계에서 구분합니다. */
+/**
+ * 프로토콜 응답의 최상위 객체와 ok 판별자만 확인합니다. 전체 스키마 검증은 하지 않습니다.
+ * inspect/run 호출부가 응답 종류를 추가 구분하므로 형식을 바꾸면 양쪽도 함께 확인해야 합니다.
+ */
 function parseResponse(value: unknown): InspectSuccess | RunnerFailure | RunSuccess {
   if (!isRecord(value) || typeof value.ok !== 'boolean') {
     throw new Error('Python 러너 응답 형식이 올바르지 않습니다.');
@@ -90,7 +93,12 @@ function cancellationError(): Error {
   return error;
 }
 
-/** Python 하위 프로세스로 풀이를 분석·실행하고 취소, 시간 제한과 프로토콜 출력 크기를 관리합니다. */
+/**
+ * CurrentProblemSession이 사용하는 Python 프로세스 경계입니다. 호출마다 새 프로세스를 띄우고
+ * JSON 요청을 stdin으로, 응답을 stdout으로 주고받습니다. 사용자 출력은 응답 필드 안에 있습니다.
+ * 진행 중 프로세스를 소유하며 시간 초과·취소·dispose에서 종료합니다.
+ * 워크스페이스 신뢰와 현재 파일 선택은 상위 세션이 확인합니다.
+ */
 export class PythonRunnerService implements vscode.Disposable {
   private readonly processes = new Set<ReturnType<typeof spawn>>();
 
@@ -178,7 +186,13 @@ export class PythonRunnerService implements vscode.Disposable {
     this.processes.clear();
   }
 
-  /** 요청을 stdin의 JSON으로 전달하고 응답을 읽습니다. 취소·시간 초과 시 자식 프로세스를 종료합니다. */
+  /**
+   * 한 프로세스의 시작·출력 수집·응답 해석·종료를 관리합니다.
+   * error, close, timeout, abort가 경쟁해도 finish가 Promise를 한 번만 완료합니다.
+   * stdout은 JSON 프로토콜이므로 바이트 상한을 넘으면 일부 JSON을 파싱하지 않고 실패합니다.
+   * -I는 Python 환경 격리 옵션이며 실행 허용 여부는 상위 세션이 결정합니다.
+   * @throws 실행기 시작 실패, 시간·출력 한도 초과, 비정상 종료, JSON 오류 또는 AbortError.
+   */
   private invoke(
     executable: string,
     cwd: string,

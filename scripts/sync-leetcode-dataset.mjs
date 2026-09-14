@@ -1,4 +1,8 @@
-/** 데이터셋 원본을 읽어 확장에 포함할 Python 테스트 데이터를 갱신합니다. */
+/**
+ * 고정 revision의 원본 JSONL에서 주차표의 75개 문제를 선택해 포함 데이터셋을 다시 생성합니다.
+ * 예상 누락 목록·중복·행 형식 검증을 통과해야 resources의 JSON을 덮어씁니다.
+ * 일반 테스트용 조회 명령이 아니라 원격 다운로드와 파일 쓰기를 수행하는 개발 작업입니다.
+ */
 import { createInterface } from 'node:readline';
 import { Readable } from 'node:stream';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';

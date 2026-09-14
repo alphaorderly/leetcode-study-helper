@@ -1,4 +1,8 @@
-/** 키와 버전이 일치하는 완료 결과를 재사용합니다. 진행 중인 load 요청 자체는 합치지 않습니다. */
+/**
+ * 동일 키·버전의 완료 결과만 재사용하는 메모리 캐시입니다. Git 커밋 변화처럼 명확한 버전이
+ * 있는 조회에 사용합니다. 진행 중 요청 공유나 오래된 응답의 게시 방지는 담당하지 않습니다.
+ * 반환 객체를 복제하지 않으므로 호출자가 캐시 값을 직접 변경하지 않아야 합니다.
+ */
 export class AsyncVersionCache<T> {
   private readonly values = new Map<string, { version: string; value: T }>();
 

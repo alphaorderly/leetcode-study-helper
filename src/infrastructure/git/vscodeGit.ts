@@ -46,7 +46,11 @@ export interface GitCommit {
   readonly parents: string[];
 }
 
-/** VS Code Git 확장이 제공하는 HEAD·remote·변경 파일과 상태 변경 이벤트입니다. */
+/**
+ * 내장 Git 확장이 마지막으로 관측한 상태입니다. 읽는 순간 디스크와 일치한다는 보장은 없습니다.
+ * 쓰기 전에는 status/fetch로 필요한 정보를 갱신하고 await 뒤 값이 달라질 수 있음을 고려합니다.
+ * indexChanges는 스테이징, workingTreeChanges는 추적 파일 수정, untrackedChanges는 새 파일입니다.
+ */
 export interface GitRepositoryState {
   readonly HEAD: GitBranch | undefined;
   readonly remotes: GitRemote[];
@@ -135,7 +139,10 @@ export function gitRefLookupPattern(name: string): string {
   return name.includes('/') ? `refs/remotes/${name}` : `refs/heads/${name}`;
 }
 
-/** 변경 전후와 이름 변경 URI를 대상 집합에 누적합니다. */
+/**
+ * 이름 변경은 원래 경로와 새 경로 모두 제출 범위에 영향을 주므로 세 URI를 함께 수집합니다.
+ * 전달받은 Set을 변경하며 없는 renameUri는 건너뜁니다.
+ */
 export function addChangeUris(target: Set<string>, changes: readonly GitChange[]): void {
   for (const change of changes) {
     target.add(change.uri.toString());
@@ -213,7 +220,11 @@ export function repositoryFingerprint(repository: GitRepository): string {
   ]);
 }
 
-/** VS Code Git 확장의 저장소 탐색·이벤트와 커밋 차이 캐시를 관리합니다. */
+/**
+ * 내장 vscode.git API를 확장에서 사용하는 최소 계약으로 연결합니다. API 활성화 Promise와
+ * 저장소별 이벤트 구독·상태 지문·커밋 차이 캐시를 소유합니다.
+ * 내용이 같은 Git 이벤트는 걸러 갱신 루프를 줄이고, dispose에서 구독과 캐시를 해제합니다.
+ */
 export class GitRepositoryAdapter implements vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   private readonly disposables: vscode.Disposable[] = [];
@@ -246,7 +257,11 @@ export class GitRepositoryAdapter implements vscode.Disposable {
     return repository;
   }
 
-  /** upstream과 공통 조상 이후 HEAD의 변경 URI를 커밋 버전별로 캐시합니다. */
+  /**
+   * HEAD SHA·upstream 이름·upstream SHA를 버전으로 완료된 diff 결과를 재사용합니다.
+   * 작업 트리와 index 변경은 이 캐시에 포함하지 않으며 호출자가 따로 합칩니다.
+   * 공통 조상이 없으면 현재 구현은 빈 집합을 반환하고 API 조회 오류는 전달합니다.
+   */
   async getCommittedChanges(
     repository: GitRepository,
     upstream: GitUpstreamRef,

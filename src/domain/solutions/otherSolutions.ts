@@ -25,7 +25,12 @@ export function isOtherSolutionFile(fileName: string, nickname: string): boolean
   );
 }
 
-/** 다른 참여자의 풀이 후보에서 선택합니다. 가능한 경우 선호 확장자를 사용하고 이전 선택을 피합니다. */
+/**
+ * 다른 닉네임의 코드 파일 중 선호 확장자가 있으면 그 집합을 먼저 선택합니다.
+ * 선택된 집합에 대안이 있을 때만 직전 파일을 제외하므로 반복 선택이 불가피할 수 있습니다.
+ * @param random 0 이상 1 미만의 난수 공급자. 테스트에서 선택 결과를 고정할 수 있습니다.
+ * @returns 선택한 파일명. 후보가 없으면 undefined이며 파일을 열거나 변경하지 않습니다.
+ */
 export function selectRandomOtherSolution(
   fileNames: readonly string[],
   nickname: string,
@@ -52,7 +57,10 @@ export function selectRandomOtherSolution(
   return pool[index];
 }
 
-/** 저장된 동의가 없으면 확인을 요청하고 승인 결과를 보관합니다. */
+/**
+ * 이미 저장된 동의가 있으면 prompt를 호출하지 않습니다. 신규 동의는 지정 확인 문구와
+ * 일치할 때만 저장하며 취소는 false입니다. 저장 실패는 전달해 동의 기록 없이 열람을 진행하지 않게 합니다.
+ */
 export async function confirmOtherSolutionAccess(
   state: ConsentState,
   prompt: () => PromiseLike<string | undefined>,

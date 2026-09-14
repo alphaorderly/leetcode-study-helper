@@ -1,7 +1,10 @@
 import { getProblemIssue } from '../../domain/study/studySchedule';
 import { CANONICAL_FULL_NAME } from './githubSubmissionClient';
 
-/** 문제 slug를 중복 제거하고 연결된 스터디 이슈가 포함된 PR 본문을 만듭니다. */
+/**
+ * 전달받은 slug 순서대로 스터디 이슈 체크리스트와 공통 안내를 만듭니다.
+ * 이슈 매핑이 없으면 slug를 그대로 표시합니다. 중복 제거는 호출자가 담당합니다.
+ */
 export function buildPullRequestBody(slugs: readonly string[]): string {
   const problemLines = slugs.map((slug) => {
     const issue = getProblemIssue(slug);
@@ -29,7 +32,10 @@ export function buildPullRequestBody(slugs: readonly string[]): string {
   ].join('\n');
 }
 
-/** 주차 브랜치와 제목·본문을 인코딩한 GitHub PR 작성 URL을 만듭니다. */
+/**
+ * 공식 main을 base, 포크 주차 브랜치를 head로 하는 GitHub 비교 URL을 만듭니다.
+ * 제목·본문은 쿼리 값으로 인코딩합니다. URL 생성 자체로 PR을 생성하거나 브라우저를 열지 않습니다.
+ */
 export function buildPullRequestCompareUrl(
   owner: string,
   branch: string,

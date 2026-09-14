@@ -29,6 +29,9 @@ export function isIgnoredByLineLint(fileName: string): boolean {
 
 /**
  * 파일 끝의 불필요한 빈 줄을 정리하고 마지막 LF를 보장합니다.
+ * 문자열로 디코딩하지 않고 바이트를 복사해 본문 인코딩을 보존합니다.
+ * 공백·탭·CR만 있는 줄을 빈 줄로 보고 마지막 연속 빈 줄의 시작 위치를 추적합니다.
+ * 파일 전체를 LF로 변환하지 않으며 입력 배열을 직접 수정하지 않습니다.
  * @returns 수정할 바이트. 변경이 없거나 빈 파일이면 undefined입니다.
  */
 export function addMissingEndOfFileNewline(content: Uint8Array): Uint8Array | undefined {

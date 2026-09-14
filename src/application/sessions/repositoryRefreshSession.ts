@@ -1,6 +1,10 @@
 import * as vscode from 'vscode';
 import type { DetectionIssue, RepositorySnapshot } from '../../shared/contracts';
-import type { GitStatusService } from '../../infrastructure/git/gitStatusService';
+import { TrailingTask } from '../../shared/async/trailingTask';
+import type {
+  SolutionGitStatusResult,
+  GitStatusService,
+} from '../../infrastructure/git/gitStatusService';
 import type { StudyRepositoryService } from '../../infrastructure/workspace/repositoryService';
 
 const REFRESH_DEBOUNCE_MS = 150;
@@ -17,21 +21,33 @@ export interface RepositoryRefreshState {
   readonly issues: DetectionIssue[];
 }
 
-/** 파일 감시, 문제별 재탐색과 Git 상태 갱신을 묶어 저장소 상태를 게시합니다. */
+/**
+ * StudyController에 저장소 목록을 공급하는 갱신 세션입니다.
+ * 전체 탐색은 파일 목록부터 게시하고 Git 조회를 후속 실행해 초기 화면을 지연시키지 않습니다.
+ * 전체 탐색은 진행 중 Promise를 공유하고, 문제 탐색은 루트·slug별로 공유합니다.
+ * Git 조회만 실행 중 요청을 누적해 한 번 더 처리합니다. 세 경로의 병합 정책은 서로 다릅니다.
+ * 생성 시 파일·Git 이벤트를 구독하고 dispose에서 구독과 예약 타이머를 해제합니다.
+ */
 export class RepositoryRefreshSession implements vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<RepositoryRefreshState>();
   private readonly disposables: vscode.Disposable[] = [];
-  private readonly pendingProblemRefreshes = new Map<string, PendingProblemRefresh>();
-  private readonly problemRefreshes = new Map<string, Promise<void>>();
   private watchers: vscode.FileSystemWatcher[] = [];
-  private refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  private gitRefreshTimer: ReturnType<typeof setTimeout> | undefined;
-  private problemRefreshTimer: ReturnType<typeof setTimeout> | undefined;
-  private refreshing: Promise<RepositoryRefreshState> | undefined;
-  private gitRefreshing: Promise<void> | undefined;
-  private gitRefreshRequested = false;
-  private forceGitRefreshRequested = false;
-  private forceRemoteRefreshRequested = false;
+  private readonly fullRefresh = {
+    running: undefined as Promise<RepositoryRefreshState> | undefined,
+    task: new TrailingTask(REFRESH_DEBOUNCE_MS, () => void this.refresh(this.getNickname())),
+  };
+  private readonly gitRefresh = {
+    running: undefined as Promise<void> | undefined,
+    requested: false,
+    forceStatus: false,
+    forceRemote: false,
+    task: new TrailingTask(REFRESH_DEBOUNCE_MS, () => void this.refreshGitStatuses()),
+  };
+  private readonly problemRefresh = {
+    pending: new Map<string, PendingProblemRefresh>(),
+    running: new Map<string, Promise<void>>(),
+    task: new TrailingTask(REFRESH_DEBOUNCE_MS, () => void this.drainProblemRefreshes()),
+  };
   private initialized = false;
   private state: RepositoryRefreshState = {
     repositories: [],
@@ -61,92 +77,104 @@ export class RepositoryRefreshSession implements vscode.Disposable {
     return this.state;
   }
 
-  /** 진행 중인 전체 탐색을 공유합니다. 목록 게시 후 Git 상태 갱신을 별도로 시작합니다. */
+  /**
+   * 수동 새로고침은 예약된 전체 탐색을 취소하고 즉시 탐색을 시작합니다.
+   * 이미 실행 중이면 그 작업을 공유하므로 새 nickname으로 추가 탐색을 예약하지는 않습니다.
+   * 반환은 파일 탐색 완료를 뜻하며 Git 후속 조회까지 기다리는 계약이 아닙니다.
+   */
   async refresh(nickname: string): Promise<RepositoryRefreshState> {
-    this.clearScheduledFullRefresh();
-    if (this.refreshing) {
-      return this.refreshing;
+    this.fullRefresh.task.cancel();
+    if (this.fullRefresh.running) {
+      return this.fullRefresh.running;
     }
-    this.refreshing = this.performRefresh(nickname);
+    this.fullRefresh.running = this.performRefresh(nickname);
     try {
-      return await this.refreshing;
+      return await this.fullRefresh.running;
     } finally {
-      this.refreshing = undefined;
+      this.fullRefresh.running = undefined;
     }
   }
 
   /** 연속된 변경 알림을 모아 마지막 알림 이후에 전체 탐색을 예약합니다. */
   scheduleFullRefresh(): void {
-    this.clearScheduledFullRefresh();
-    this.refreshTimer = setTimeout(() => {
-      this.refreshTimer = undefined;
-      void this.refresh(this.getNickname());
-    }, REFRESH_DEBOUNCE_MS);
+    this.fullRefresh.task.schedule();
   }
 
-  /** 중복 요청을 묶고 강제 조회 옵션을 누적합니다. 진행 중 요청 뒤에 새 요청도 처리합니다. */
+  /**
+   * 진행 중 요청이 있으면 같은 완료를 기다리되 새 요청이 있었다는 사실과 강제 옵션을 누적합니다.
+   * 따라서 호출자가 true로 요청한 옵션이 뒤의 false 요청에 의해 취소되지 않습니다.
+   * @param forceStatus 각 Git 조회 전 실제 status를 갱신할지 여부.
+   * @param forceRemote GitHub의 완료 결과 캐시를 우회할지 여부.
+   */
   async refreshGitStatuses(forceStatus = false, forceRemote = false): Promise<void> {
-    this.gitRefreshRequested = true;
-    this.forceGitRefreshRequested ||= forceStatus;
-    this.forceRemoteRefreshRequested ||= forceRemote;
-    if (this.gitRefreshing) {
-      return this.gitRefreshing;
+    this.gitRefresh.requested = true;
+    this.gitRefresh.forceStatus ||= forceStatus;
+    this.gitRefresh.forceRemote ||= forceRemote;
+    if (this.gitRefresh.running) {
+      return this.gitRefresh.running;
     }
 
-    this.gitRefreshing = this.drainGitRefreshes();
+    this.gitRefresh.running = this.drainGitRefreshes();
     try {
-      await this.gitRefreshing;
+      await this.gitRefresh.running;
     } finally {
-      this.gitRefreshing = undefined;
+      this.gitRefresh.running = undefined;
     }
   }
 
-  /** 한 문제의 파일을 다시 읽고 필요한 경우 Git 상태도 갱신합니다. */
+  /**
+   * 생성·삭제 등 사용자 작업 직후 한 문제를 갱신하고 같은 문제의 예약 항목을 제거합니다.
+   * 이미 실행 중이면 해당 작업을 공유하며 옵션을 추가 누적하지 않습니다. Git 전체 갱신과 다른 계약입니다.
+   * @throws 파일 탐색·Git 조회에서 전달된 오류. 이 메서드는 오류를 표시 상태로 바꾸지 않습니다.
+   */
   async refreshProblem(rootUri: string, slug: string, forceStatus: boolean): Promise<void> {
     const key = this.problemKey(rootUri, slug);
-    this.pendingProblemRefreshes.delete(key);
-    const existing = this.problemRefreshes.get(key);
+    this.problemRefresh.pending.delete(key);
+    const existing = this.problemRefresh.running.get(key);
     if (existing) {
       return existing;
     }
-    const refresh = (async () => {
-      const repository = this.state.repositories.find((item) => item.rootUri === rootUri);
-      if (!repository) {
-        return;
-      }
-      const updated = await this.repositoryService.refreshProblem(
-        repository,
-        slug,
-        this.getNickname(),
-      );
-      const [withGit] = await this.withGitStatuses([updated], forceStatus);
-      if (!withGit) {
-        return;
-      }
-      this.publish({
-        ...this.state,
-        repositories: this.state.repositories.map((item) =>
-          item.rootUri === rootUri ? withGit : item,
-        ),
-      });
-    })();
-    this.problemRefreshes.set(key, refresh);
+    const refresh = this.performProblemRefresh(rootUri, slug, forceStatus);
+    this.problemRefresh.running.set(key, refresh);
     try {
       await refresh;
     } finally {
-      this.problemRefreshes.delete(key);
+      this.problemRefresh.running.delete(key);
     }
+  }
+
+  /** 지정 문제를 다시 읽어 Git 표시를 붙인 뒤 해당 루트의 스냅샷을 교체합니다. 요청 공유는 refreshProblem이 담당합니다. */
+  private async performProblemRefresh(
+    rootUri: string,
+    slug: string,
+    forceStatus: boolean,
+  ): Promise<void> {
+    const repository = this.state.repositories.find((item) => item.rootUri === rootUri);
+    if (!repository) {
+      return;
+    }
+    const updated = await this.repositoryService.refreshProblem(
+      repository,
+      slug,
+      this.getNickname(),
+    );
+    const [withGit] = await this.withGitStatuses([updated], forceStatus);
+    if (!withGit) {
+      return;
+    }
+    this.publish({
+      ...this.state,
+      repositories: this.state.repositories.map((item) =>
+        item.rootUri === rootUri ? withGit : item,
+      ),
+    });
   }
 
   /** 파일 감시와 예약된 갱신 타이머, 이벤트 구독을 해제합니다. */
   dispose(): void {
-    this.clearScheduledFullRefresh();
-    if (this.gitRefreshTimer) {
-      clearTimeout(this.gitRefreshTimer);
-    }
-    if (this.problemRefreshTimer) {
-      clearTimeout(this.problemRefreshTimer);
-    }
+    this.fullRefresh.task.cancel();
+    this.gitRefresh.task.cancel();
+    this.problemRefresh.task.cancel();
     this.disposeWatchers();
     for (const disposable of this.disposables) {
       disposable.dispose();
@@ -158,43 +186,12 @@ export class RepositoryRefreshSession implements vscode.Disposable {
   private async performRefresh(nickname: string): Promise<RepositoryRefreshState> {
     const scanResult = await this.repositoryService.scan(nickname);
     this.publish({
-      repositories: this.reuseGitStatuses(scanResult.repositories),
+      repositories: reuseGitStatuses(scanResult.repositories, this.state.repositories),
       issues: scanResult.issues,
     });
     this.initialized = true;
     void this.refreshGitStatuses(true);
     return this.state;
-  }
-
-  /** 새 탐색 결과에 직전 Git 표시를 붙여 후속 조회 중 화면이 불필요하게 비지 않게 합니다. */
-  private reuseGitStatuses(repositories: RepositorySnapshot[]): RepositorySnapshot[] {
-    const previousRepositories = new Map(
-      this.state.repositories.map((repository) => [repository.rootUri, repository]),
-    );
-    return repositories.map((repository) => {
-      const previousRepository = previousRepositories.get(repository.rootUri);
-      const previousSolutions = new Map(
-        previousRepository?.problems
-          .flatMap((problem) => problem.solutions)
-          .map((solution) => [solution.uri, solution] as const) ?? [],
-      );
-      return {
-        ...repository,
-        gitRemote: previousRepository?.gitRemote,
-        submission: previousRepository?.submission
-          ? { ...previousRepository.submission, status: 'checking' }
-          : undefined,
-        problems: repository.problems.map((problem) => ({
-          ...problem,
-          solutions: problem.solutions.map((solution) => ({
-            ...solution,
-            gitStatus: previousSolutions.get(solution.uri)?.gitStatus ?? 'checking',
-            submissionStatus: previousSolutions.get(solution.uri)?.submissionStatus ?? 'checking',
-            pullRequestNumber: previousSolutions.get(solution.uri)?.pullRequestNumber,
-          })),
-        })),
-      };
-    });
   }
 
   /** 저장소별 Git 조회 결과를 풀이와 제출 상태에 결합합니다. */
@@ -220,20 +217,7 @@ export class RepositoryRefreshSession implements vscode.Disposable {
           ),
           forceRemote,
         );
-        return {
-          ...repository,
-          gitRemote: result.remoteName,
-          submission: result.submission,
-          problems: repository.problems.map((problem) => ({
-            ...problem,
-            solutions: problem.solutions.map((solution) => ({
-              ...solution,
-              gitStatus: result.statuses.get(solution.uri) ?? 'unknown',
-              submissionStatus: result.submissionStatuses?.get(solution.uri) ?? 'unknown',
-              pullRequestNumber: result.pullRequestNumbers?.get(solution.uri),
-            })),
-          })),
-        };
+        return applyGitStatuses(repository, result);
       }),
     );
   }
@@ -243,34 +227,33 @@ export class RepositoryRefreshSession implements vscode.Disposable {
     if (!this.initialized) {
       return;
     }
-    if (this.gitRefreshTimer) {
-      clearTimeout(this.gitRefreshTimer);
-    }
-    this.gitRefreshTimer = setTimeout(() => {
-      this.gitRefreshTimer = undefined;
-      void this.refreshGitStatuses();
-    }, REFRESH_DEBOUNCE_MS);
+    this.gitRefresh.task.schedule();
   }
 
-  /** 조회 중 저장소 목록이 바뀌면 결과를 게시하지 않고 최신 목록으로 다시 조회합니다. */
+  /**
+   * 누적된 Git 요청을 소진합니다. 이번 회차의 옵션을 소비한 뒤 새 요청은 다음 회차에 남깁니다.
+   * 전체 탐색을 기다린 후의 배열 참조가 조회 기준입니다. await 중 배열이 교체되면
+   * 결과를 버리고 소비한 강제 조회 옵션까지 복구하여 최신 목록을 다시 조회합니다.
+   * 내용 비교로 대체하면 같은 내용의 재탐색도 새 기준이라는 의미를 잃게 됩니다.
+   */
   private async drainGitRefreshes(): Promise<void> {
-    while (this.gitRefreshRequested) {
-      this.gitRefreshRequested = false;
-      const forceStatus = this.forceGitRefreshRequested;
-      this.forceGitRefreshRequested = false;
-      const forceRemote = this.forceRemoteRefreshRequested;
-      this.forceRemoteRefreshRequested = false;
-      if (this.refreshing) {
-        await this.refreshing;
+    while (this.gitRefresh.requested) {
+      this.gitRefresh.requested = false;
+      const forceStatus = this.gitRefresh.forceStatus;
+      this.gitRefresh.forceStatus = false;
+      const forceRemote = this.gitRefresh.forceRemote;
+      this.gitRefresh.forceRemote = false;
+      if (this.fullRefresh.running) {
+        await this.fullRefresh.running;
       }
       const sourceRepositories = this.state.repositories;
       const repositories = await this.withGitStatuses(sourceRepositories, forceStatus, forceRemote);
       if (this.state.repositories === sourceRepositories) {
         this.publish({ ...this.state, repositories });
       } else {
-        this.gitRefreshRequested = true;
-        this.forceGitRefreshRequested ||= forceStatus;
-        this.forceRemoteRefreshRequested ||= forceRemote;
+        this.gitRefresh.requested = true;
+        this.gitRefresh.forceStatus ||= forceStatus;
+        this.gitRefresh.forceRemote ||= forceRemote;
       }
     }
   }
@@ -317,33 +300,22 @@ export class RepositoryRefreshSession implements vscode.Disposable {
       return;
     }
     const pending = { rootUri: folder.uri.toString(), slug };
-    this.pendingProblemRefreshes.set(this.problemKey(pending.rootUri, slug), pending);
-    if (this.problemRefreshTimer) {
-      clearTimeout(this.problemRefreshTimer);
+    this.problemRefresh.pending.set(this.problemKey(pending.rootUri, slug), pending);
+    this.problemRefresh.task.schedule();
+  }
+
+  /** 예약된 문제 목록을 먼저 비워 실행 중 들어온 변경이 다음 예약에 남도록 합니다. */
+  private async drainProblemRefreshes(): Promise<void> {
+    const refreshes = [...this.problemRefresh.pending.values()];
+    this.problemRefresh.pending.clear();
+    for (const item of refreshes) {
+      await this.refreshProblem(item.rootUri, item.slug, true);
     }
-    this.problemRefreshTimer = setTimeout(() => {
-      this.problemRefreshTimer = undefined;
-      const refreshes = [...this.pendingProblemRefreshes.values()];
-      this.pendingProblemRefreshes.clear();
-      void (async () => {
-        for (const item of refreshes) {
-          await this.refreshProblem(item.rootUri, item.slug, true);
-        }
-      })();
-    }, REFRESH_DEBOUNCE_MS);
   }
 
   /** 저장소 URI와 slug를 NUL 문자로 구분해 문제별 갱신 키를 만듭니다. */
   private problemKey(rootUri: string, slug: string): string {
     return `${rootUri}\u0000${slug}`;
-  }
-
-  /** 예약된 전체 갱신 타이머를 취소하고 참조를 해제합니다. */
-  private clearScheduledFullRefresh(): void {
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = undefined;
-    }
   }
 
   /** 등록된 파일 감시기를 모두 해제하고 목록을 비웁니다. */
@@ -353,4 +325,59 @@ export class RepositoryRefreshSession implements vscode.Disposable {
     }
     this.watchers = [];
   }
+}
+
+/** 새 탐색 결과에 직전 Git 표시를 붙여 후속 조회 중 화면이 불필요하게 비지 않게 합니다. */
+function reuseGitStatuses(
+  repositories: RepositorySnapshot[],
+  previous: RepositorySnapshot[],
+): RepositorySnapshot[] {
+  const previousRepositories = new Map(
+    previous.map((repository) => [repository.rootUri, repository]),
+  );
+  return repositories.map((repository) => {
+    const previousRepository = previousRepositories.get(repository.rootUri);
+    const previousSolutions = new Map(
+      previousRepository?.problems
+        .flatMap((problem) => problem.solutions)
+        .map((solution) => [solution.uri, solution] as const) ?? [],
+    );
+    return {
+      ...repository,
+      gitRemote: previousRepository?.gitRemote,
+      submission: previousRepository?.submission
+        ? { ...previousRepository.submission, status: 'checking' }
+        : undefined,
+      problems: repository.problems.map((problem) => ({
+        ...problem,
+        solutions: problem.solutions.map((solution) => ({
+          ...solution,
+          gitStatus: previousSolutions.get(solution.uri)?.gitStatus ?? 'checking',
+          submissionStatus: previousSolutions.get(solution.uri)?.submissionStatus ?? 'checking',
+          pullRequestNumber: previousSolutions.get(solution.uri)?.pullRequestNumber,
+        })),
+      })),
+    };
+  });
+}
+
+/** 조회 결과를 새 스냅샷에 붙입니다. 입력 객체를 변경하지 않아 진행 중 조회의 기준 참조가 유지됩니다. */
+function applyGitStatuses(
+  repository: RepositorySnapshot,
+  result: SolutionGitStatusResult,
+): RepositorySnapshot {
+  return {
+    ...repository,
+    gitRemote: result.remoteName,
+    submission: result.submission,
+    problems: repository.problems.map((problem) => ({
+      ...problem,
+      solutions: problem.solutions.map((solution) => ({
+        ...solution,
+        gitStatus: result.statuses.get(solution.uri) ?? 'unknown',
+        submissionStatus: result.submissionStatuses?.get(solution.uri) ?? 'unknown',
+        pullRequestNumber: result.pullRequestNumbers?.get(solution.uri),
+      })),
+    })),
+  };
 }

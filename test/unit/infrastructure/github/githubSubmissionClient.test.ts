@@ -109,6 +109,62 @@ afterEach(() => {
 });
 
 describe('GitHubSubmissionClient branch state', () => {
+  it.each(['none', 'merged', 'closed-unmerged'] as const)(
+    'reads the latest branch PR when open PRs are absent: %s',
+    async (kind) => {
+      const latest = {
+        number: 90,
+        title: 'Week 01',
+        html_url: 'https://github.com/DaleStudy/leetcode-study/pull/90',
+        state: 'closed',
+        merged_at: kind === 'merged' ? '2026-01-01' : null,
+        head: { ref: 'week-01' },
+      };
+      const requests: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: string | URL | Request) => {
+          const url = String(input);
+          requests.push(url);
+          if (url.includes('/pulls?state=all')) return response(kind === 'none' ? [] : [latest]);
+          if (url.includes('/pulls/90/files'))
+            return response([{ filename: 'two-sum/CaseUser.py' }]);
+          if (url.includes('/git/trees/main')) return response({ tree: [], truncated: false });
+          if (url.includes('/compare/')) return response({ files: [], commits: [], behind_by: 0 });
+          return response([]);
+        }),
+      );
+      const client = new GitHubSubmissionClient();
+      const result = await client.getRemoteSubmission(remote, 'week-01', true);
+      expect(result.activePullRequest).toBeUndefined();
+      expect(result.latestPullRequest).toEqual(kind === 'none' ? undefined : latest);
+      expect(result.pullRequestFiles).toEqual(kind === 'none' ? [] : ['two-sum/CaseUser.py']);
+      expect(requests.some((url) => url.includes('/pulls/90/files'))).toBe(kind !== 'none');
+      client.dispose();
+    },
+  );
+
+  it('does not request a branch comparison or latest PR without a requested or open branch', async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes('/git/trees/main')) return response({ tree: [], truncated: false });
+        if (url.includes('/compare/')) return response({ files: [], commits: [], behind_by: 0 });
+        return response([]);
+      }),
+    );
+    const client = new GitHubSubmissionClient();
+    const result = await client.getRemoteSubmission(remote, undefined, true);
+    expect(result.headBranch).toBeUndefined();
+    expect(result.latestPullRequest).toBeUndefined();
+    expect(requests.filter((url) => url.includes('/compare/'))).toHaveLength(1);
+    expect(requests.some((url) => url.includes('state=all'))).toBe(false);
+    client.dispose();
+  });
+
   it('loads every page of open PRs and PR files', async () => {
     const firstPagePulls = Array.from({ length: 100 }, (_, index) => ({
       number: index + 1,

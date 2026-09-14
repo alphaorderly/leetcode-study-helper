@@ -1,4 +1,8 @@
-/** 소스와 개발 스크립트의 이름 있는 선언에 설명이 있는 JSDoc이 붙었는지 검사합니다. */
+/**
+ * 기본적으로 src와 scripts를 읽어 이름 있는 선언의 설명 누락을 찾습니다.
+ * AST로 설명 존재 여부만 확인하며 언어·길이·동작과의 일치 여부는 자동 판정하지 않습니다.
+ * 파일을 변경하지 않고 누락·구문 오류가 있으면 종료 코드를 1로 설정합니다.
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';

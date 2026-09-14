@@ -136,3 +136,65 @@ describe('Python LeetCode runner', () => {
     expect(result.assertion).toContain('candidate(2) == 3');
   });
 });
+
+describe('Python runner execution contract', () => {
+  const request = {
+    mode: 'run',
+    filename: 'solution.py',
+    slug: 'sample',
+    entryPoint: 'Solution().answer',
+    requiredObjects: [],
+    candidateId: 'c0m0',
+    test: 'def check(candidate):\n    assert candidate() == 1',
+  };
+
+  it.each([
+    ['c0m0', 1],
+    ['c0m1', 2],
+    ['c1m0', 3],
+  ])('restores overwritten candidate %s', (candidateId, answer) => {
+    const source =
+      'class Solution:\n    def answer(self): return 1\n    def answer(self): return 2\nclass Solution:\n    def answer(self): return 3';
+    expect(
+      runner({
+        ...request,
+        source,
+        candidateId,
+        test: `def check(candidate):\n    assert candidate() == ${answer}`,
+      }),
+    ).toMatchObject({ ok: true, outcome: 'passed', passed: 1, total: 1 });
+  });
+
+  it('reports syntax location before attempting execution', () => {
+    expect(runner({ ...request, source: 'class Solution\n    pass' })).toMatchObject({
+      ok: false,
+      kind: 'syntax',
+      line: 1,
+    });
+  });
+
+  it('reports execution exceptions separately from assertion failures', () => {
+    const result = runner({
+      ...request,
+      source: 'class Solution:\n    def answer(self): raise ValueError("sample failure")',
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      kind: 'execution',
+      case: 1,
+      message: 'ValueError: sample failure',
+    });
+    expect(result.traceback).toContain('solution.py');
+  });
+
+  it('keeps stdout and stderr bounded without corrupting the JSON response', () => {
+    const result = runner({
+      ...request,
+      source:
+        'import sys\nclass Solution:\n    def answer(self):\n        print("x" * 1000100)\n        print("diagnostic", file=sys.stderr)\n        return 1',
+    });
+    expect(result).toMatchObject({ ok: true, outcome: 'passed', stderr: 'diagnostic\n' });
+    expect(String(result.stdout).length).toBeLessThan(1000100);
+    expect(result.stdout).toContain('출력이 1MB에서 잘렸습니다.');
+  });
+});

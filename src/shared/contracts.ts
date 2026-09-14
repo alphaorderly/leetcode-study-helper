@@ -9,10 +9,20 @@ export interface ProblemMetadata {
 /** 문제 slug를 키로 사용하는 메타데이터 목록입니다. */
 export type ProblemCatalog = Record<string, ProblemMetadata>;
 
-/** 현재 upstream에 풀이의 로컬 변경이 반영되었는지를 나타내는 조회 상태입니다. */
+/**
+ * 현재 브랜치의 upstream 기준으로 로컬 변경의 반영 여부를 표시합니다.
+ * pushed는 공식 저장소 병합 완료를 뜻하지 않습니다. checking은 조회 대기·진행 중이고,
+ * unknown은 upstream이나 조회 근거가 없어 판단하지 못한 상태입니다.
+ */
 export type SolutionGitStatus = 'checking' | 'pushed' | 'unpushed' | 'unknown';
 
-/** 풀이의 주차 제출 단계입니다. staged-outdated는 스테이징 이후 추가 수정된 상태입니다. */
+/**
+ * 주차 제출 흐름에서 파일의 현재 위치입니다.
+ * working → staged → push-needed → pr-needed/pr-open → merged 순서의 표시가 기본입니다.
+ * staged-outdated는 index에 올린 뒤 파일이 다시 수정된 상태라 재스테이징이 필요합니다.
+ * sync-needed는 동기화 후 반영 여부를 다시 확인해야 한다는 뜻입니다.
+ * checking은 조회 중, unknown은 근거 부족이며 둘 다 미제출 확정 상태가 아닙니다.
+ */
 export type SolutionSubmissionStatus =
   | 'checking'
   | 'working'
@@ -26,7 +36,11 @@ export type SolutionSubmissionStatus =
   | 'conflict'
   | 'unknown';
 
-/** 웹뷰에서 사용하는 풀이 파일 식별자와 Git·제출 상태입니다. */
+/**
+ * 파일 URI를 기준으로 편집기 선택·화면 명령과 연결하는 풀이 스냅샷입니다.
+ * submissionStatus가 없으면 주차 제출 정보가 아직 결합되지 않은 상태입니다.
+ * pullRequestNumber는 연결된 열린 PR을 확인한 경우에만 제공됩니다.
+ */
 export interface SolutionFileSnapshot {
   name: string;
   uri: string;
@@ -35,7 +49,11 @@ export interface SolutionFileSnapshot {
   pullRequestNumber?: number;
 }
 
-/** 카탈로그 메타데이터에 주차와 현재 닉네임의 풀이 목록을 결합한 문제 상태입니다. */
+/**
+ * 카탈로그와 파일 탐색 결과를 합친 문제 상태입니다. completed는 내 풀이 파일이
+ * 존재한다는 뜻이며 정답 통과 여부가 아닙니다. week는 주차표에 없으면 생략되고,
+ * solutionUrl은 README에서 허용된 정답 링크를 찾지 못하면 생략됩니다.
+ */
 export interface ProblemSnapshot extends ProblemMetadata {
   slug: string;
   week?: number;
@@ -45,7 +63,11 @@ export interface ProblemSnapshot extends ProblemMetadata {
   solutions: SolutionFileSnapshot[];
 }
 
-/** 하나의 워크스페이스 루트에 대한 문제 목록과 제출 상태입니다. */
+/**
+ * 하나의 워크스페이스 루트에서 탐색한 문제 목록입니다. rootUri는 저장소 선택의 키입니다.
+ * gitRemote는 현재 upstream 이름이며, submission이 없으면 제출 조회 결과가 아직 없습니다.
+ * 갱신 세션은 이 객체를 직접 수정하지 않고 새 목록으로 교체해 조회 기준을 구분합니다.
+ */
 export interface RepositorySnapshot {
   name: string;
   rootUri: string;
@@ -63,7 +85,11 @@ export interface SubmissionFileSnapshot {
   week?: number;
 }
 
-/** 표시용 커밋과 분류된 변경 파일입니다. 파일 조회 실패는 빈 성공 목록과 구분합니다. */
+/**
+ * 화면에 표시할 커밋과 풀이·기타 파일 분류입니다. pushed는 원격 이력에서 확보한 커밋 여부입니다.
+ * fileInspectionStatus가 unavailable이면 files가 비어 있어도 변경 없는 커밋으로 간주하지 않습니다.
+ * 선택적 검사 필드는 아직 검사 정보를 담지 않은 스냅샷과의 호환을 위해 남겨 둡니다.
+ */
 export interface SubmissionCommitSnapshot {
   hash: string;
   shortHash: string;
@@ -97,7 +123,11 @@ export interface PullRequestSnapshot {
 /** 포크 신원 조회 중 상태와 검증 성공·미지원·조회 실패를 구분합니다. */
 export type ForkVerificationStatus = 'checking' | 'verified' | 'unsupported' | 'unavailable';
 
-/** 공식 저장소의 포크인지 확인한 결과와 인증·조회 실패 사유입니다. */
+/**
+ * origin이 지원하는 공식 저장소의 포크인지 조회한 결과입니다.
+ * unsupported는 대상 조건 불일치이고 unavailable은 조회 실패이므로 재시도로 달라질 수 있습니다.
+ * owner·repository·originUrl은 URL을 해석한 경우에만 있고, needsGitHubSignIn은 로그인 안내용입니다.
+ */
 export interface ForkIdentitySnapshot {
   status: ForkVerificationStatus;
   owner?: string;
@@ -124,7 +154,14 @@ export interface BlockingTrackedFile {
   state: 'staged' | 'modified' | 'conflict';
 }
 
-/** 웹뷰에 전달하는 제출 상태입니다. 버튼 활성 여부는 표시용이며 Git 쓰기 전에는 재검증해야 합니다. */
+/**
+ * 웹뷰의 제출 그래프와 버튼을 위한 조회 시점의 스냅샷입니다. 실제 Git 쓰기 승인 정보가 아닙니다.
+ * checking은 조회 중, unavailable은 필요한 조회 실패, unsupported는 대상 조건 불일치,
+ * blocked는 우선순위에 따라 선택한 제출 차단 사유가 있는 상태입니다. ready여도 쓰기 전 재검증합니다.
+ * branch는 현재 로컬 브랜치이고 submissionBranch는 원격 PR 등을 반영한 제출 대상입니다.
+ * activeSubmissionWeek는 한 주차로 결정되지 않으면 없을 수 있습니다. pendingCommits에는
+ * 표시용으로 합친 pushed 커밋도 들어가므로 미푸시 여부는 각 항목의 pushed를 확인합니다.
+ */
 export interface RepositorySubmissionSnapshot {
   status: 'checking' | 'ready' | 'unsupported' | 'blocked' | 'unavailable';
   branch?: string;
@@ -174,7 +211,11 @@ interface CurrentProblemBase {
   runner: PythonRunnerSnapshot;
 }
 
-/** Python 소스에서 선택 가능한 풀이 후보의 식별자와 선언 위치입니다. */
+/**
+ * Python AST가 찾은 실행 후보입니다. id의 cNmM은 Solution 클래스와 같은 이름 메서드의
+ * 0부터 시작하는 등장 순서입니다. 위치 표시는 1부터 시작하는 소스 줄 번호입니다.
+ * 소스를 편집하면 식별자가 달라질 수 있어 이전 분석 결과로 실행하지 않아야 합니다.
+ */
 export interface PythonSolutionCandidate {
   id: string;
   label: string;
@@ -188,7 +229,12 @@ interface PythonRunnerWithCandidates {
   selectedCandidateId: string;
 }
 
-/** 분석·실행 결과를 구분한 화면 상태입니다. 후보와 결과 필드는 status에 따라 접근합니다. */
+/**
+ * 설명 로딩과 독립적으로 갱신되는 로컬 Python 분석·실행 상태입니다.
+ * checking은 분석 대기·진행 중, unavailable은 신뢰·파일 형식·데이터·객체 조건으로 실행 불가입니다.
+ * failed는 assert 실패, error는 분석·프로세스·실행 오류입니다. 실행 중 오류는 후보를 보존하지만
+ * 분석 오류는 후보가 없을 수 있으므로 status와 candidates 유무를 확인한 뒤 접근합니다.
+ */
 export type PythonRunnerSnapshot =
   | { status: 'checking' }
   | { status: 'unavailable'; reason: string; missingObjects?: string[] }
@@ -221,7 +267,11 @@ export type PythonRunnerSnapshot =
       stderr?: string;
     } & Partial<PythonRunnerWithCandidates>);
 
-/** 현재 풀이의 설명 로딩 상태와 독립적으로 갱신되는 Python 실행 상태입니다. */
+/**
+ * status는 LeetCode 설명 조회 상태이고 runner.status는 Python 상태입니다. 둘을 혼동하지 않습니다.
+ * idle은 아직 설명 요청 전이며 loaded일 때만 detail이 있습니다. 설명은 slug별로 캐시하지만
+ * solution과 runner는 현재 파일을 가리킵니다.
+ */
 export type CurrentProblemSnapshot =
   | (CurrentProblemBase & { status: 'idle' })
   | (CurrentProblemBase & { status: 'loading' })
@@ -241,7 +291,11 @@ export interface LanguageOption {
   extension: string;
 }
 
-/** 설정, 저장소와 현재 문제를 웹뷰에 전달하는 전체 상태입니다. */
+/**
+ * StudyController가 조립해 웹뷰에 보내는 전체 상태입니다. 현재 문제 변경은 별도 메시지로도
+ * 전달되어 관련 없는 목록·제출 입력 DOM을 유지합니다. currentProblem 부재는 등록된 풀이를
+ * 선택하지 않았다는 뜻이며, 설명 조회 중이라는 뜻이 아닙니다.
+ */
 export interface ExtensionSnapshot {
   nickname: string;
   preferredLanguage: string;
@@ -259,7 +313,11 @@ export interface LineLintFixResult {
   ignored: number;
 }
 
-/** 웹뷰가 확장에 요청하는 명령의 직렬화 가능한 메시지 계약입니다. */
+/**
+ * 브라우저에서 확장 호스트로 보내는 사용자 명령입니다. URI는 문자열로 전달합니다.
+ * 메시지에 담긴 파일·주차는 요청 값일 뿐이며 컨트롤러와 Git 서비스가 대상과 현재 상태를 검증합니다.
+ * 타입 선언만으로 런타임 payload가 검증되는 것은 아닙니다.
+ */
 export type WebviewToExtensionMessage =
   | { type: 'ready' }
   | { type: 'refresh' }

@@ -1,7 +1,12 @@
-import type { ExtensionSnapshot, RepositorySnapshot } from '../../shared/contracts';
+import type { RepositorySnapshot } from '../../shared/contracts';
+import { actionButton } from '../components/controls';
 import { element } from '../components/dom';
-import { renderSubmissionGraph } from '../components/submissionGraph';
-import type { PostMessage, UiState } from '../state/viewTypes';
+import {
+  resolveSubmissionRepository,
+  submissionHeaderActions,
+} from '../state/submissionGraphModel';
+import type { ViewContext } from '../state/viewTypes';
+import { renderSubmissionGraph } from './submissionGraph';
 
 /** 저장소의 제출 단계별 풀이 수를 화면 요약 항목으로 만듭니다. */
 function renderSubmissionSummary(repository: RepositorySnapshot): HTMLElement {
@@ -30,59 +35,52 @@ function renderSubmissionSummary(repository: RepositorySnapshot): HTMLElement {
 /** 제출 새로고침·포크 동기화·main 복귀 버튼에 현재 허용 상태와 명령을 연결합니다. */
 function renderSubmissionActions(
   repository: RepositorySnapshot,
-  ui: UiState,
-  post: PostMessage,
+  { ui, post }: ViewContext,
 ): HTMLElement {
   const actions = element('div', 'submission-view-actions');
-  const refreshButton = element('button', 'secondary-button submission-header-button', '새로고침');
-  refreshButton.type = 'button';
-  refreshButton.disabled = ui.busy;
-  refreshButton.addEventListener('click', () => post({ type: 'refreshSubmission' }));
-  const syncButton = element('button', 'secondary-button submission-header-button', '포크 동기화');
-  syncButton.type = 'button';
-  syncButton.disabled = ui.busy || !repository.submission?.canSync;
-  syncButton.title = repository.submission?.canSync
-    ? '공식 main 가져오기'
-    : (repository.submission?.syncDisabledReason ??
-      '스테이징·추적 파일 수정과 미푸시 커밋을 먼저 정리해 주세요.');
-  syncButton.addEventListener('click', () =>
-    post({ type: 'syncFork', rootUri: repository.rootUri }),
+  const model = submissionHeaderActions(repository, ui);
+  const className = 'secondary-button submission-header-button';
+  actions.append(
+    actionButton({
+      className,
+      label: model.refresh.label,
+      disabled: model.refresh.disabled,
+      onClick: () => post(model.refresh.message),
+    }),
+    actionButton({
+      className,
+      label: model.sync.label,
+      disabled: model.sync.disabled,
+      title: model.sync.title,
+      onClick: () => post(model.sync.message),
+    }),
   );
-  const returnButton = element(
-    'button',
-    'secondary-button submission-header-button',
-    'main으로 돌아가 동기화',
-  );
-  returnButton.type = 'button';
-  returnButton.disabled = ui.busy || !repository.submission?.canReturnToMain;
-  if (!repository.submission?.canReturnToMain) {
-    returnButton.title = 'PR 병합과 깨끗한 주차 브랜치 상태를 먼저 확인해 주세요.';
+  const returnToMain = model.returnToMain;
+  if (returnToMain) {
+    actions.append(
+      actionButton({
+        className,
+        label: returnToMain.label,
+        disabled: returnToMain.disabled,
+        title: returnToMain.title,
+        onClick: () => post(returnToMain.message),
+      }),
+    );
   }
-  returnButton.addEventListener('click', () =>
-    post({ type: 'returnToMainAndSync', rootUri: repository.rootUri }),
-  );
-  actions.append(refreshButton, syncButton);
-  if (/^week-\d{2}$/.test(repository.submission?.branch ?? '')) {
-    actions.append(returnButton);
-  }
-
   return actions;
 }
 
-/** 저장소 선택과 제출 화면 헤더를 만들고 선택한 저장소의 제출 흐름을 렌더링합니다. */
-export function renderSubmissionView(
-  state: ExtensionSnapshot,
-  ui: UiState,
-  post: PostMessage,
-  rerender: () => void,
-): HTMLElement {
+/**
+ * UI에서 선택한 루트를 모델로 해석해 해당 저장소의 제출 그래프를 그립니다.
+ * 선택이 사라졌으면 검증된 포크 또는 첫 저장소로 대체합니다. 저장소 전환은 ui와 렌더 콜백을
+ * 통해 반영하며 이 함수가 Git 상태를 직접 조회하거나 변경하지 않습니다.
+ */
+export function renderSubmissionView(context: ViewContext, rerender: () => void): HTMLElement {
+  const { state, ui } = context;
   const section = element('section', 'submission-view');
   section.setAttribute('role', 'tabpanel');
   const repositories = state.repositories;
-  let repository = repositories.find(({ rootUri }) => rootUri === ui.submissionRepository);
-  repository ??=
-    repositories.find(({ submission }) => submission?.fork.status === 'verified') ??
-    repositories[0];
+  const repository = resolveSubmissionRepository(repositories, ui.submissionRepository);
   if (!repository) {
     section.append(element('p', 'empty-state', '제출할 저장소가 없습니다.'));
     return section;
@@ -95,8 +93,7 @@ export function renderSubmissionView(
     element('h2', 'submission-view-title', '주차별 제출'),
     element('p', 'submission-view-description', '커밋에 추가한 풀이만 병합 전까지 표시됩니다.'),
   );
-  const actions = renderSubmissionActions(repository, ui, post);
-  header.append(titleGroup, actions);
+  header.append(titleGroup, renderSubmissionActions(repository, context));
   section.append(header);
 
   if (repositories.length > 1) {
@@ -114,9 +111,6 @@ export function renderSubmissionView(
     });
     section.append(select);
   }
-  section.append(
-    renderSubmissionSummary(repository),
-    renderSubmissionGraph(repository, state, ui, post),
-  );
+  section.append(renderSubmissionSummary(repository), renderSubmissionGraph(repository, context));
   return section;
 }

@@ -17,7 +17,11 @@ import {
 
 export const MAX_PUSH_COMMITS = 200;
 
-/** Git 작업 경계에서 저장소 신원, 변경 파일과 제출 이력을 검증합니다. */
+/**
+ * SubmissionActions와 SubmissionBranches가 공유하는 작업 전제조건 검사기입니다.
+ * 검사 결과를 캐시하지 않으며 호출 시점의 Git 상태·ref·origin을 사용합니다.
+ * 어떤 검사 전에 status/fetch가 필요한지는 실행 순서를 소유하는 호출자가 결정합니다.
+ */
 export class SubmissionGuards {
   /** 저장소 접근기와 포크 신원 조회기를 검증 작업에 연결합니다. */
   constructor(
@@ -47,7 +51,11 @@ export class SubmissionGuards {
     return repository;
   }
 
-  /** 브랜치가 없거나 merge·rebase가 진행 중이면 오류를 던집니다. */
+  /**
+   * HEAD 브랜치와 merge·rebase 진행 여부만 검사합니다.
+   * 이름의 Clean은 작업 트리 전체가 깨끗하다는 뜻이 아닙니다. index·작업 파일 검사는
+   * 스테이징·커밋·동기화 등 각 명령의 허용 범위에 맞춰 별도로 수행합니다.
+   */
   requireCleanOperationState(repository: GitRepository): void {
     if (!repository.state.HEAD?.name) {
       throw new Error('현재 Git 브랜치를 확인할 수 없습니다.');
@@ -151,18 +159,7 @@ export class SubmissionGuards {
       throw new Error(`${headRef}의 커밋이 너무 많아 자동으로 검증할 수 없습니다.`);
     }
     for (const commit of commits) {
-      rejectMergeCommit(commit);
-      const parent = commit.parents[0];
-      if (!parent) {
-        throw new Error(`커밋 ${commit.hash.slice(0, 7)}의 변경 범위를 확인할 수 없습니다.`);
-      }
-      const paths = relativeChangePaths(
-        repository.rootUri,
-        await repository.diffBetween(parent, commit.hash),
-      );
-      if (paths.size === 0) {
-        throw new Error(`커밋 ${commit.hash.slice(0, 7)}의 변경 파일을 확인할 수 없습니다.`);
-      }
+      const paths = await this.readSubmissionCommitPaths(repository, commit);
       for (const relativePath of paths) {
         const solution = fileByPath.get(relativePath);
         if (solution?.week !== expectedWeek) {
@@ -172,7 +169,35 @@ export class SubmissionGuards {
     }
   }
 
-  /** 정확히 일치하는 ref를 찾습니다. 조회 실패와 없는 ref는 undefined로 반환합니다. */
+  /**
+   * 단일 부모 커밋의 변경 경로를 읽습니다. merge·부모 부재·빈 diff는 검증 불가로 거부합니다.
+   * 커밋과 push의 주차 검증이 같은 파일 검사 기준을 사용하도록 이 단계만 공유합니다.
+   * 주차별 허용 조건과 조회 시점은 호출자가 정합니다.
+   */
+  async readSubmissionCommitPaths(
+    repository: GitRepository,
+    commit: GitCommit,
+  ): Promise<Set<string>> {
+    rejectMergeCommit(commit);
+    const parent = commit.parents[0];
+    if (!parent) {
+      throw new Error(`커밋 ${commit.hash.slice(0, 7)}의 변경 범위를 확인할 수 없습니다.`);
+    }
+    const paths = relativeChangePaths(
+      repository.rootUri,
+      await repository.diffBetween(parent, commit.hash),
+    );
+    if (paths.size === 0) {
+      throw new Error(`커밋 ${commit.hash.slice(0, 7)}의 변경 파일을 확인할 수 없습니다.`);
+    }
+    return paths;
+  }
+
+  /**
+   * VS Code Git API의 ref 패턴 조회 후 이름이 정확히 같은 항목만 반환합니다.
+   * 현재 계약은 ref 부재와 조회 예외를 모두 undefined로 처리합니다. 호출자는 이 값만으로
+   * 브랜치의 안전성을 확정하지 않고 후속 이력·원격 검증을 수행합니다.
+   */
   async getBranch(repository: GitRepository, name: string) {
     try {
       return (await repository.getRefs({ pattern: gitRefLookupPattern(name) })).find(

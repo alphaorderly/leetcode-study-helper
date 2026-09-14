@@ -23,7 +23,12 @@ export interface SolutionGitStatusResult {
   submission?: RepositorySubmissionSnapshot;
 }
 
-/** VS Code Git 이벤트와 인증 수명을 관리하며 상태 조회와 제출 작업을 전용 모듈에 위임합니다. */
+/**
+ * StudyController가 소유하는 Git 기능의 진입점입니다.
+ * 일반 upstream 반영 상태와 주차 제출 상태를 함께 제공하지만 두 상태의 기준은 다릅니다.
+ * 인증 변경 시 원격 캐시를 비우고, 저장소 이벤트는 갱신 세션에 전달합니다.
+ * 쓰기는 SubmissionActions에 위임하며 dispose에서 인증·Git 구독과 조회 캐시를 정리합니다.
+ */
 export class GitStatusService implements vscode.Disposable {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   private readonly repositoryAdapter = new GitRepositoryAdapter();

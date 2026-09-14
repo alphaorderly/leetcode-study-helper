@@ -16,7 +16,11 @@ export class GitHubAuthService implements vscode.Disposable {
     });
   }
 
-  /** 기본적으로 조용히 기존 세션을 조회합니다. prompt가 true일 때만 로그인 흐름을 요청합니다. */
+  /**
+   * 일반 상태 조회는 기존 인증 세션만 조용히 사용해 로그인 창을 띄우지 않습니다.
+   * @param options prompt가 true이면 사용자의 로그인 명령으로 새 세션을 요청합니다.
+   * @returns 액세스 토큰. 세션 부재·사용자 취소·인증 API 실패는 모두 undefined입니다.
+   */
   async getAccessToken(options: { prompt?: boolean } = {}): Promise<string | undefined> {
     try {
       const session = await vscode.authentication.getSession(
