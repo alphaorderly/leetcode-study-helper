@@ -1,13 +1,20 @@
+import { GitHubHttpClient, githubRequestNeedsSignIn } from './githubHttpClient';
+import { CANONICAL_FULL_NAME, type ParsedGitHubRemote } from './githubRemote';
+// 기존 호출부가 사용하던 공개 경로를 유지합니다. 내부 구현은 각각의 역할별 모듈에 있습니다.
+export { GitHubRequestError, githubRequestNeedsSignIn } from './githubHttpClient';
+export {
+  CANONICAL_OWNER,
+  CANONICAL_REPOSITORY,
+  CANONICAL_FULL_NAME,
+  CANONICAL_REMOTE_URL,
+  parseConsistentRemote,
+  isCanonicalRemote,
+  resolveCanonicalRemoteName,
+  type ParsedGitHubRemote,
+} from './githubRemote';
 import type { ForkIdentitySnapshot } from '../../shared/contracts';
-import type { GitRemote } from '../git/vscodeGit';
-
-export const CANONICAL_OWNER = 'DaleStudy';
-export const CANONICAL_REPOSITORY = 'leetcode-study';
-export const CANONICAL_FULL_NAME = `${CANONICAL_OWNER}/${CANONICAL_REPOSITORY}`;
-export const CANONICAL_REMOTE_URL = `https://github.com/${CANONICAL_FULL_NAME}.git`;
 
 const REMOTE_CACHE_MS = 30_000;
-const GITHUB_API_TIMEOUT_MS = 8_000;
 
 /** 포크 여부와 원본 저장소 확인에 필요한 GitHub 저장소 응답 필드입니다. */
 interface GitHubRepositoryResponse {
@@ -71,13 +78,6 @@ interface GitHubTreeResponse {
   readonly tree?: GitHubTreeEntry[];
 }
 
-/** GitHub remote URL에서 추출한 소유자·저장소 이름과 원래 URL입니다. */
-export interface ParsedGitHubRemote {
-  readonly owner: string;
-  readonly repository: string;
-  readonly url: string;
-}
-
 /** 포크 브랜치 비교, 주차 PR와 공식 파일 정보를 합친 원격 제출 조회 결과입니다. */
 export interface RemoteSubmissionState {
   readonly headBranch?: string;
@@ -105,139 +105,30 @@ interface CachedRemoteValue<T> {
   readonly value: T;
 }
 
-/** 지원하는 GitHub HTTPS·SSH URL을 해석하며 인식할 수 없으면 undefined입니다. */
-function parseGitHubRemote(url: string | undefined): ParsedGitHubRemote | undefined {
-  if (!url) {
-    return undefined;
-  }
-  const trimmed = url.trim();
-  const match = trimmed.match(
-    /^(?:https?:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/:\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i,
-  );
-  if (!match?.[1] || !match[2]) {
-    return undefined;
-  }
-  return {
-    owner: match[1],
-    repository: match[2],
-    url: trimmed,
-  };
-}
-
-/** 소유자와 저장소 이름을 대소문자 구분 없이 비교합니다. */
-function sameGitHubRepository(left: ParsedGitHubRemote, right: ParsedGitHubRemote): boolean {
-  return (
-    left.owner.toLowerCase() === right.owner.toLowerCase() &&
-    left.repository.toLowerCase() === right.repository.toLowerCase()
-  );
-}
-
-/** fetch와 push URL을 해석하고 서로 다른 GitHub 저장소를 가리키면 undefined를 반환합니다. */
-export function parseConsistentRemote(
-  remote: GitRemote | undefined,
-): ParsedGitHubRemote | undefined {
-  if (!remote) {
-    return undefined;
-  }
-  const fetchUrl = remote.fetchUrl?.trim();
-  const pushUrl = remote.pushUrl?.trim();
-  const fetch = parseGitHubRemote(fetchUrl);
-  const push = parseGitHubRemote(pushUrl);
-  if ((fetchUrl && !fetch) || (pushUrl && !push)) {
-    return undefined;
-  }
-  if (fetch && push && !sameGitHubRepository(fetch, push)) {
-    return undefined;
-  }
-  return push ?? fetch;
-}
-
-/** URL이 공식 DaleStudy 저장소를 가리키는지 확인합니다. */
-export function isCanonicalRemote(url: string | undefined): boolean {
-  const parsed = parseGitHubRemote(url);
-  return (
-    parsed?.owner.toLowerCase() === CANONICAL_OWNER.toLowerCase() &&
-    parsed.repository.toLowerCase() === CANONICAL_REPOSITORY.toLowerCase()
-  );
-}
-
-/**
- * 공식 저장소 remote를 찾으며 upstream 이름을 우선합니다.
- * @throws 기존 upstream이 공식 저장소를 가리키지 않는 경우.
- */
-export function resolveCanonicalRemoteName(remotes: readonly GitRemote[]): string | undefined {
-  const namedUpstream = remotes.find(({ name }) => name === 'upstream');
-  if (namedUpstream) {
-    const parsed = parseConsistentRemote(namedUpstream);
-    if (
-      !parsed ||
-      parsed.owner.toLowerCase() !== CANONICAL_OWNER.toLowerCase() ||
-      parsed.repository.toLowerCase() !== CANONICAL_REPOSITORY.toLowerCase()
-    ) {
-      throw new Error(
-        '기존 upstream이 DaleStudy/leetcode-study를 가리키지 않습니다. fetch/push URL을 모두 확인해 주세요.',
-      );
-    }
-  }
-  const canonicalNames = remotes.flatMap((remote) => {
-    const parsed = parseConsistentRemote(remote);
-    return parsed &&
-      parsed.owner.toLowerCase() === CANONICAL_OWNER.toLowerCase() &&
-      parsed.repository.toLowerCase() === CANONICAL_REPOSITORY.toLowerCase()
-      ? [remote.name]
-      : [];
-  });
-  if (canonicalNames.includes('upstream')) {
-    return 'upstream';
-  }
-  return canonicalNames[0];
-}
-
-/** GitHub 요청의 HTTP 상태와 인증 사용 여부를 보존하는 오류입니다. */
-export class GitHubRequestError extends Error {
-  readonly status: number;
-  readonly usedAuth: boolean;
-  readonly needsSignIn: boolean;
-
-  /** HTTP 상태와 인증 여부로 로그인 안내 필요 여부를 계산합니다. */
-  constructor(status: number, usedAuth: boolean) {
-    const needsSignIn = status === 401 || (status === 403 && !usedAuth);
-    super(
-      needsSignIn
-        ? 'GitHub API 요청 한도에 걸렸습니다. GitHub으로 로그인하면 상태를 확인할 수 있습니다.'
-        : `GitHub 상태 확인 실패 (${status})`,
-    );
-    this.name = 'GitHubRequestError';
-    this.status = status;
-    this.usedAuth = usedAuth;
-    this.needsSignIn = needsSignIn;
-  }
-}
-
-/** GitHub 요청 실패가 로그인 안내를 필요로 하는지 확인합니다. */
-export function githubRequestNeedsSignIn(error: unknown): boolean {
-  return error instanceof GitHubRequestError && error.needsSignIn;
-}
-
 /**
  * 포크 신원, 주차 PR·비교 결과, 공식 파일 트리를 GitHub API에서 읽습니다.
  * 완료 결과를 30초 동안 캐시하며 제출 캐시는 요청 브랜치별로 분리합니다.
  * 쓰기 기능은 없고, Git 작업 후 clearSubmissionCache 또는 인증 변경 후 clearCaches를 호출합니다.
  */
 export class GitHubSubmissionClient {
+  /** 요청마다 인증 정보를 읽는 전송 계층입니다. 이 클라이언트의 제출 판단·캐시와 분리되어 있습니다. */
+  private readonly http: GitHubHttpClient;
+  /** owner/repository 소문자 키의 완료된 포크 신원입니다. 조회 실패 시 이전 verified 값은 만료 후에도 fallback으로 사용합니다. */
   private readonly forkIdentityCache = new Map<string, CachedRemoteValue<ForkIdentitySnapshot>>();
+  /** 요청한 브랜치별 완료 결과입니다. 열린 PR 때문에 실제 응답 브랜치가 달라져도 요청 키로 보관합니다. */
   private readonly remoteSubmissionCache = new Map<
     string,
     CachedRemoteValue<RemoteSubmissionState>
   >();
+  /** 공식 main의 파일 경로·blob SHA 캐시입니다. 제출 작업·인증 변경·dispose에서 비우며 실패한 조회 결과는 저장하지 않습니다. */
   private canonicalTreeCache: CachedRemoteValue<CanonicalFileTree> | undefined;
 
   /**
    * 비동기 토큰 공급자를 보관합니다. 생략하면 인증 없이 조회하며 HTTP 요청은 전역 fetch를 사용합니다.
    */
-  constructor(
-    private readonly getAccessToken: () => Promise<string | undefined> = async () => undefined,
-  ) {}
+  constructor(getAccessToken: () => Promise<string | undefined> = async () => undefined) {
+    this.http = new GitHubHttpClient(getAccessToken);
+  }
 
   /**
    * DaleStudy 포크인지 조회합니다. 조회 실패 시 이전 verified 결과가 있으면 재사용합니다.
@@ -250,7 +141,7 @@ export class GitHubSubmissionClient {
       return cached.value;
     }
     try {
-      const response = await this.githubJson<GitHubRepositoryResponse>(
+      const response = await this.http.githubJson<GitHubRepositoryResponse>(
         `/repos/${encodeURIComponent(remote.owner)}/${encodeURIComponent(remote.repository)}`,
       );
       const source = response.source?.full_name ?? response.parent?.full_name;
@@ -309,9 +200,9 @@ export class GitHubSubmissionClient {
     }
     const pullsPath = `/repos/${CANONICAL_FULL_NAME}/pulls?state=open&base=main`;
     const [allOpenPullRequests, canonicalFiles, mainCompare] = await Promise.all([
-      this.githubPagedJson<GitHubPullRequest>(pullsPath),
+      this.http.githubPagedJson<GitHubPullRequest>(pullsPath),
       this.getCanonicalFiles(force),
-      this.githubJson<GitHubCompareResponse>(
+      this.http.githubJson<GitHubCompareResponse>(
         `/repos/${CANONICAL_FULL_NAME}/compare/main...${encodeURIComponent(remote.owner)}:main`,
       ),
     ]);
@@ -329,7 +220,7 @@ export class GitHubSubmissionClient {
       : undefined;
     let compare: GitHubCompareResponse | undefined;
     if (resolvedHeadBranch) {
-      compare = await this.githubJsonOptional<GitHubCompareResponse>(
+      compare = await this.http.githubJsonOptional<GitHubCompareResponse>(
         `/repos/${CANONICAL_FULL_NAME}/compare/main...${encodeURIComponent(remote.owner)}:${encodeURIComponent(resolvedHeadBranch)}`,
       );
     }
@@ -371,7 +262,7 @@ export class GitHubSubmissionClient {
   ): Promise<GitHubPullRequest | undefined> {
     if (active) return active;
     if (!headBranch) return undefined;
-    const pulls = await this.githubJson<GitHubPullRequest[]>(
+    const pulls = await this.http.githubJson<GitHubPullRequest[]>(
       `/repos/${CANONICAL_FULL_NAME}/pulls?state=all&base=main&head=${encodeURIComponent(`${remote.owner}:${headBranch}`)}&sort=updated&direction=desc&per_page=1`,
     );
     return pulls[0];
@@ -382,7 +273,7 @@ export class GitHubSubmissionClient {
     pullRequest: GitHubPullRequest | undefined,
   ): Promise<string[]> {
     if (!pullRequest) return [];
-    const files = await this.githubPagedJson<GitHubPullFile>(
+    const files = await this.http.githubPagedJson<GitHubPullFile>(
       `/repos/${CANONICAL_FULL_NAME}/pulls/${pullRequest.number}/files`,
     );
     return files.map(({ filename }) => filename);
@@ -414,7 +305,7 @@ export class GitHubSubmissionClient {
       return cached.value;
     }
     try {
-      const response = await this.githubJson<GitHubTreeResponse>(
+      const response = await this.http.githubJson<GitHubTreeResponse>(
         `/repos/${CANONICAL_FULL_NAME}/git/trees/main?recursive=1`,
       );
       if (response.truncated || !Array.isArray(response.tree)) {
@@ -438,59 +329,6 @@ export class GitHubSubmissionClient {
       return value;
     } catch {
       return undefined;
-    }
-  }
-
-  /** 토큰과 시간 제한을 적용해 GitHub JSON을 조회하며 HTTP 실패는 전용 오류로 전달합니다. */
-  private async githubJson<T>(apiPath: string): Promise<T> {
-    const token = await this.getAccessToken();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), GITHUB_API_TIMEOUT_MS);
-    const headers: Record<string, string> = {
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'leetcode-study-helper',
-      'X-GitHub-Api-Version': '2022-11-28',
-    };
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-    try {
-      const response = await fetch(`https://api.github.com${apiPath}`, {
-        headers,
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        throw new GitHubRequestError(response.status, Boolean(token));
-      }
-      return (await response.json()) as T;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /** 페이지별 GitHub 배열 응답을 끝까지 합치며 조회 한도 초과 시 오류를 던집니다. */
-  private async githubPagedJson<T>(apiPath: string): Promise<T[]> {
-    const values: T[] = [];
-    for (let page = 1; page <= 20; page += 1) {
-      const separator = apiPath.includes('?') ? '&' : '?';
-      const batch = await this.githubJson<T[]>(`${apiPath}${separator}per_page=100&page=${page}`);
-      values.push(...batch);
-      if (batch.length < 100) {
-        return values;
-      }
-    }
-    throw new Error('GitHub 목록이 너무 커서 안전하게 전체 상태를 확인할 수 없습니다.');
-  }
-
-  /** 선택적 GitHub 리소스를 조회하며 404만 undefined로 변환하고 다른 오류는 전달합니다. */
-  private async githubJsonOptional<T>(apiPath: string): Promise<T | undefined> {
-    try {
-      return await this.githubJson<T>(apiPath);
-    } catch (error) {
-      if (error instanceof GitHubRequestError && error.status === 404) {
-        return undefined;
-      }
-      throw error;
     }
   }
 }

@@ -52,23 +52,51 @@ function isCancellation(error: unknown): boolean {
  * 생성자는 이벤트를 구독하며 dispose는 예약·요청·자식 프로세스와 구독을 정리합니다.
  */
 export class CurrentProblemSession implements vscode.Disposable {
+  /**
+   * 외부 입출력 의존성입니다. 기본 구현 또는 테스트 대체물을 생성자에서 연결합니다.
+   * Python 프로세스 서비스는 disposables에 포함해 세션 종료 시 실행 중 프로세스도 정리합니다.
+   */
   private readonly leetCodeApiService: Pick<LeetCodeApiService, 'getProblem'>;
   private readonly testDataService: Pick<LeetCodeTestDataService, 'getProblem'>;
   private readonly pythonRunnerService: Pick<PythonRunnerService, 'inspect' | 'run' | 'dispose'>;
+  /** 설명과 러너 상태를 합친 현재 선택의 스냅샷을 컨트롤러에 전달합니다. 전체 목록 이벤트와는 별개입니다. */
   private readonly changeEmitter = new vscode.EventEmitter<CurrentProblemSnapshot | undefined>();
+  /** 생성자에서 등록한 편집기·문서·설정 이벤트와 소유한 Python 서비스를 해제할 목록입니다. */
   private readonly disposables: vscode.Disposable[] = [];
+  /**
+   * 문제 slug별 설명 조회 상태입니다. 같은 문제의 다른 풀이로 이동해도 재사용합니다.
+   * 파일 선택이 바뀌어도 진행 중 설명 응답은 캐시에 남기며, 현재 문제일 때만 화면에 게시합니다.
+   */
   private readonly problemLoadStates = new Map<string, ProblemLoadState>();
+  /** 마지막으로 전달받은 저장소 목록입니다. 파일 URI를 풀이 정보로 연결할 때 읽고 setRepositories에서 교체합니다. */
   private repositories: RepositorySnapshot[] = [];
+  /**
+   * 현재 추적하는 편집 문서 URI입니다. 포커스가 웹뷰로 옮겨져도 해당 문서가 보이면 유지합니다.
+   * 이 URI가 워크스페이스에 등록된 풀이인지는 selection을 찾는 단계에서 별도로 확인합니다.
+   */
   private activeDocumentUri = vscode.window.activeTextEditor?.document.uri.toString();
+  /**
+   * 현재 목록에서 찾은 풀이와 문제의 소속 정보입니다. 등록된 풀이가 없으면 undefined입니다.
+   * 같은 파일의 Git 상태 갱신도 이 정보는 교체하지만 분석·실행을 취소하지 않습니다.
+   */
   private selection: CurrentSelection | undefined;
+  /**
+   * 현재 runner 표시가 귀속된 풀이 URI입니다. 선택된 파일과 다르면 이전 결과를 표시하지 않습니다.
+   * 실행 중 요청의 유효성은 이 값만으로 판단하지 않고 요청별 취소 신호도 함께 확인합니다.
+   */
   private runnerUri: string | undefined;
+  /** 분석 대기부터 실행 결과까지의 표시 상태입니다. checking은 아직 실행 가능한 후보가 확정되지 않았음을 뜻합니다. */
   private runner: PythonRunnerSnapshot = { status: 'checking' };
+  /** 연속 편집을 합쳐 마지막 변경 350ms 뒤 분석을 시작하는 예약입니다. 이미 실행 중인 요청 취소와는 별개입니다. */
   private readonly inspectionTask = new TrailingTask(
     INSPECTION_DEBOUNCE_MS,
     () => void this.inspectCurrentSolution(),
   );
+  /** 현재 분석 요청의 취소 소유자입니다. 교체된 요청의 finally는 새 소유자를 지우지 않도록 참조를 비교합니다. */
   private inspectionController: AbortController | undefined;
+  /** 현재 테스트 실행 요청의 취소 소유자입니다. 입력 준비 중에도 유효하며 선택 변경·편집·새 실행에서 취소합니다. */
   private runController: AbortController | undefined;
+  /** 마지막으로 발행한 합성 스냅샷입니다. emitCurrent에서만 구성하며 선택된 풀이가 없으면 undefined입니다. */
   private current: CurrentProblemSnapshot | undefined;
 
   readonly onDidChange = this.changeEmitter.event;
@@ -164,9 +192,11 @@ export class CurrentProblemSession implements vscode.Disposable {
     const { selection, candidates } = this.requireRunCandidate(candidateId);
 
     this.cancelRun();
+    /** 이 실행이 소유한 신호를 입력 읽기부터 결과 게시까지 전달합니다. 이후 선택 변경은 이 신호를 취소합니다. */
     const controller = new AbortController();
     this.runController = controller;
     const prepared = await this.prepareRun(selection, controller);
+    /** 테스트 데이터·소스를 기다리는 동안 다른 파일로 이동했을 수 있으므로 실행 시작 전에 다시 확인합니다. */
     if (!this.canPublishResult(selection, controller.signal)) {
       this.releaseRunController(controller);
       return;
@@ -279,6 +309,7 @@ export class CurrentProblemSession implements vscode.Disposable {
    */
   private syncSelection(): void {
     const next = this.findSelection();
+    /** 선택의 동일성은 객체 참조가 아니라 풀이 URI로 판단합니다. 목록 재조회만으로 실행을 끊지 않기 위함입니다. */
     const previousUri = this.selection?.solution.uri;
     const nextUri = next?.solution.uri;
     this.selection = next;

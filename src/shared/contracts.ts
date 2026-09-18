@@ -171,17 +171,25 @@ export interface RepositorySubmissionSnapshot {
   stagedFiles: SubmissionFileSnapshot[];
   otherStagedFiles: string[];
   pendingCommits: SubmissionCommitSnapshot[];
+  /** 로컬 이력 조회 결과입니다. undefined는 이력이 빈 것이 아니라 해당 정보가 제공되지 않은 상태입니다. */
   localHistory?: LocalSubmissionHistorySnapshot;
+  /** 공식 main과 원격 주차 브랜치 비교에서 찾은 내 풀이입니다. 원격 조회 실패 시 빈 배열일 수 있어 status와 함께 읽습니다. */
   forkFiles: SubmissionFileSnapshot[];
   otherForkFiles: string[];
+  /** 현재 열린 PR입니다. 닫힌 PR의 병합·종료 상태를 표시할 때는 pullRequest를 사용합니다. */
   activePullRequest?: PullRequestSnapshot;
+  /** 선택된 브랜치의 최근 PR로, 병합되거나 미병합 종료된 PR도 포함합니다. 부재만으로 미제출을 확정하지 않습니다. */
   pullRequest?: PullRequestSnapshot;
+  /** 제출 차단 또는 조회 실패를 설명할 우선 사유입니다. undefined여도 서비스의 쓰기 직전 검증은 필요합니다. */
   blockedReason?: string;
   summary: SubmissionSummary;
+  /** 화면에서 포크 동기화를 제안할 수 있는지입니다. 사용자가 누른 시점의 실제 Git 상태는 서비스가 다시 확인합니다. */
   canSync: boolean;
+  /** 병합된 주차 브랜치에서 main 복귀를 제안할 수 있는지입니다. canSync와 작업 파일 허용 조건이 다릅니다. */
   canReturnToMain: boolean;
   hasCanonicalRemote: boolean;
   behindOfficialMain: boolean;
+  /** 동기화에 한정한 비활성 이유입니다. 일반 제출 차단 사유와 동시에 존재할 수 있습니다. */
   syncDisabledReason?: string;
   blockingTrackedFiles: BlockingTrackedFile[];
 }

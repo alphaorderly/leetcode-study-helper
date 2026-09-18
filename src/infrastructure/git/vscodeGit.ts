@@ -226,11 +226,17 @@ export function repositoryFingerprint(repository: GitRepository): string {
  * 내용이 같은 Git 이벤트는 걸러 갱신 루프를 줄이고, dispose에서 구독과 캐시를 해제합니다.
  */
 export class GitRepositoryAdapter implements vscode.Disposable {
+  /** 내용이 달라진 Git 이벤트만 상위 갱신 세션에 전달합니다. 모든 원시 Git 이벤트를 그대로 중계하지 않습니다. */
   private readonly changeEmitter = new vscode.EventEmitter<void>();
+  /** Git API의 전역 이벤트 구독입니다. 저장소별 구독은 루트별 해제를 위해 별도의 Map에서 관리합니다. */
   private readonly disposables: vscode.Disposable[] = [];
+  /** 저장소 루트 URI당 하나의 상태 구독을 보관합니다. 저장소가 닫히거나 어댑터를 해제할 때 제거합니다. */
   private readonly repositorySubscriptions = new Map<string, vscode.Disposable>();
+  /** 루트 URI별 마지막 상태 지문입니다. 같은 HEAD·ref·파일 상태의 반복 이벤트를 걸러냅니다. */
   private readonly repositoryFingerprints = new Map<string, string>();
+  /** 루트별 커밋 차이 캐시입니다. 버전은 HEAD SHA·upstream 이름·SHA이며 index·작업 트리는 포함하지 않습니다. */
   private readonly committedChanges = new AsyncVersionCache<ReadonlySet<string>>();
+  /** Git API 활성화를 공유하는 Promise입니다. 완료 후에도 보관하므로 사용 불가 결과 역시 현재 어댑터 수명 동안 재사용됩니다. */
   private apiPromise: Promise<GitApi | undefined> | undefined;
 
   readonly onDidChange = this.changeEmitter.event;

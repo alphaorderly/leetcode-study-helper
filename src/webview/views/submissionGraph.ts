@@ -42,6 +42,7 @@ export function renderSubmissionGraph(
 ): HTMLElement {
   const graph = element('div', 'submission-graph');
   const submission = repository.submission;
+  /** 레이아웃 판단은 표시 모델에 위임합니다. 여기서는 결정된 화면의 DOM을 조립하고 버튼 이벤트만 연결합니다. */
   const layout = submissionGraphLayout(submission);
 
   if (layout.type === 'loading') {
@@ -61,6 +62,7 @@ export function renderSubmissionGraph(
   }
 
   const facts = submissionGraphFacts(submission);
+  /** 한 번 계산한 파생 플래그와 같은 저장소 스냅샷을 각 노드에 전달합니다. 노드별로 다른 상태를 읽지 않습니다. */
   const renderContext: SubmissionRenderContext = { ...context, repository, submission, facts };
   const auth = submissionAuthBanner(submission);
   if (auth) {
@@ -81,6 +83,7 @@ export function renderSubmissionGraph(
     }
   }
 
+  /** 화면은 제출 목적지에서 로컬 작업 쪽으로 읽습니다. PR→origin→커밋→스테이징 순서는 실제 명령 실행 순서가 아닙니다. */
   graph.append(
     renderPullRequestNode(renderContext),
     renderOriginNode(renderContext),

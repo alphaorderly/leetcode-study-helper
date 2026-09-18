@@ -1,3 +1,5 @@
+import { SubmissionCommands } from './submissionCommands';
+import { requireSolution } from './snapshotQueries';
 import * as vscode from 'vscode';
 import {
   ANSWER_CONFIRM_LABEL,
@@ -15,7 +17,6 @@ import type {
   CurrentProblemSnapshot,
   ExtensionSnapshot,
   LineLintFixResult,
-  RepositorySnapshot,
 } from '../shared/contracts';
 import { CurrentProblemSession } from './sessions/currentProblemSession';
 import { GitStatusService } from '../infrastructure/git/gitStatusService';
@@ -36,18 +37,35 @@ const CONFIGURATION_SECTION = 'leetcodeStudyHelper';
  * dispose는 소유한 서비스·세션과 이벤트 구독을 함께 해제합니다.
  */
 export class StudyController implements vscode.Disposable {
+  /** 컨트롤러가 소유하는 작업 서비스입니다. Git 서비스는 이벤트 구독도 소유하므로 dispose 목록에 포함합니다. */
   private readonly gitStatusService = new GitStatusService();
   private readonly repositoryService = new StudyRepositoryService();
   private readonly solutionFileService = new SolutionFileService();
+  /** 현재 풀이 선택·분석·실행을 관리하는 세션입니다. 저장소 목록은 컨트롤러가 갱신 세션에서 받아 전달합니다. */
   private readonly currentProblemSession: CurrentProblemSession;
+  /** 파일·Git 갱신을 합쳐 저장소 목록을 공급합니다. 명령은 갱신을 요청하고 결과는 이벤트로 다시 받아 게시합니다. */
   private readonly repositoryRefreshSession: RepositoryRefreshSession;
+  /** 설정·저장소 목록을 포함한 전체 상태 이벤트입니다. 현재 문제만 바뀔 때는 아래의 별도 이벤트를 사용합니다. */
   private readonly changeEmitter = new vscode.EventEmitter<ExtensionSnapshot>();
+  /** 현재 문제 변경만 알리는 이벤트입니다. 웹뷰가 목록 DOM과 제출 중 입력을 유지하면서 상세 영역만 갱신하게 합니다. */
   private readonly currentProblemEmitter = new vscode.EventEmitter<
     CurrentProblemSnapshot | undefined
   >();
+  /** 직접 소유한 서비스·세션과 이들이 발생시키는 이벤트 구독을 함께 해제합니다. 제출 명령 객체는 수명을 소유하지 않습니다. */
   private readonly disposables: vscode.Disposable[] = [];
+  /** 루트 URI와 문제 slug별로 마지막에 연 다른 참여자의 파일명을 기록해 다음 후보 탐색에 전달합니다. */
   private readonly lastOtherSolutionNames = new Map<string, string>();
+  /** 상태는 getter로 읽게 하고 갱신은 세션에 위임합니다. 생성 시에는 콜백을 보관할 뿐 세션을 호출하지 않습니다. */
+  private readonly submissionCommands = new SubmissionCommands(
+    () => this.snapshot,
+    this.gitStatusService,
+    (forceStatus, forceRemote) =>
+      this.repositoryRefreshSession.refreshGitStatuses(forceStatus, forceRemote),
+    () => this.refresh(),
+  );
+  /** getState의 최초 전체 탐색 여부입니다. true여도 후속 Git 조회까지 완료되었다는 뜻은 아닙니다. */
   private initialized = false;
+  /** 마지막 화면 상태입니다. 초기값은 설정·파일 조회 전에도 유효한 빈 화면을 제공하며 각 이벤트에서 새 객체로 교체합니다. */
   private snapshot: ExtensionSnapshot = {
     nickname: '',
     preferredLanguage: DEFAULT_LANGUAGE,
@@ -343,151 +361,52 @@ export class StudyController implements vscode.Disposable {
 
   /** 신뢰·풀이·주차를 확인해 스테이징하고 Git 표시 상태를 다시 읽습니다. */
   async stageSolution(uriString: string): Promise<void> {
-    this.requireTrustedWorkspace('풀이를 커밋에 추가하려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const target = this.requireSolution(uriString);
-    const repository = this.requireSubmissionRepository(target.rootUri);
-    this.validateSubmissionWeek(repository, target.week);
-    await this.gitStatusService.stageSolution(
-      vscode.Uri.parse(target.rootUri),
-      vscode.Uri.parse(target.uri),
-      target.week,
-      this.submissionSolutions(repository),
-    );
-    await this.repositoryRefreshSession.refreshGitStatuses(true);
+    return this.submissionCommands.stageSolution(uriString);
   }
 
   /** 등록된 풀이의 스테이징을 해제하고 Git 표시 상태를 다시 읽습니다. */
   async unstageSolution(uriString: string): Promise<void> {
-    this.requireTrustedWorkspace('스테이징을 해제하려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const target = this.requireSolution(uriString);
-    this.requireSubmissionRepository(target.rootUri, true);
-    await this.gitStatusService.unstageSolution(
-      vscode.Uri.parse(target.rootUri),
-      vscode.Uri.parse(target.uri),
-    );
-    await this.repositoryRefreshSession.refreshGitStatuses(true);
+    return this.submissionCommands.unstageSolution(uriString);
   }
 
   /** 활성 주차와 스테이징 상태를 확인해 커밋하고 성공하면 Git 표시 상태를 갱신합니다. */
   async commitActiveWeek(rootUri: string, message: string): Promise<void> {
-    this.requireTrustedWorkspace('풀이를 커밋하려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const repository = this.requireSubmissionRepository(rootUri);
-    const submission = repository.submission!;
-    if (!submission.activeSubmissionWeek || submission.stagedFiles.length === 0) {
-      throw new Error('커밋 준비 상태인 풀이가 없습니다.');
-    }
-    if (submission.stagedFiles.some(({ week }) => week !== submission.activeSubmissionWeek)) {
-      throw new Error('서로 다른 주차의 풀이를 한 커밋에 포함할 수 없습니다.');
-    }
-    const stagedUris = new Set(submission.stagedFiles.map(({ uri }) => uri));
-    const stagedOutdated = repository.problems
-      .flatMap(({ solutions }) => solutions)
-      .some(
-        ({ uri, submissionStatus }) =>
-          stagedUris.has(uri) && submissionStatus === 'staged-outdated',
-      );
-    if (stagedOutdated) {
-      throw new Error('스테이징 후 수정된 풀이를 다시 커밋에 추가해 주세요.');
-    }
-    await this.gitStatusService.commit(
-      vscode.Uri.parse(rootUri),
-      message,
-      submission.stagedFiles,
-      this.submissionSolutions(repository),
-    );
-    await this.repositoryRefreshSession.refreshGitStatuses(true);
+    return this.submissionCommands.commitActiveWeek(rootUri, message);
   }
 
   /** 활성 저장소의 주차 브랜치를 push하고 Git·원격 상태를 다시 읽습니다. */
   async pushActiveWeek(rootUri: string): Promise<void> {
-    this.requireTrustedWorkspace('풀이를 push하려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const repository = this.requireSubmissionRepository(rootUri);
-    await this.gitStatusService.push(
-      vscode.Uri.parse(rootUri),
-      this.submissionSolutions(repository),
-    );
-    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
+    return this.submissionCommands.pushActiveWeek(rootUri);
   }
 
   /** 선택한 저장소의 제출 상태로 주차 PR 또는 생성 화면을 엽니다. */
   async openPullRequest(rootUri: string): Promise<void> {
-    const repository = this.requireSubmissionRepository(rootUri);
-    await this.gitStatusService.openPullRequest(repository.submission!, this.snapshot.nickname);
+    return this.submissionCommands.openPullRequest(rootUri);
   }
 
   /** 신뢰·저장소·동기화 가능 여부를 확인해 포크를 동기화하고 성공하면 전체 상태를 갱신합니다. */
   async syncFork(rootUri: string): Promise<void> {
-    this.requireTrustedWorkspace('포크를 동기화하려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const repository = this.requireSubmissionRepository(rootUri);
-    if (!repository.submission?.canSync) {
-      throw new Error('현재 Git 변경을 정리한 뒤 포크를 동기화해 주세요.');
-    }
-    await this.gitStatusService.syncFork(
-      vscode.Uri.parse(rootUri),
-      this.submissionSolutions(repository),
-    );
-    await this.refresh();
-    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
+    return this.submissionCommands.syncFork(rootUri);
   }
 
   /** 대상 변경 목록을 보여주고 확인받은 뒤 풀이 외 추적 변경을 되돌립니다. */
   async discardOtherTrackedChanges(rootUri: string): Promise<void> {
-    this.requireTrustedWorkspace('변경을 되돌리려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const repository = this.requireSubmissionRepository(rootUri, true);
-    const paths =
-      repository.submission?.blockingTrackedFiles
-        .filter(({ kind, state }) => kind === 'other' && state !== 'conflict')
-        .map(({ relativePath }) => relativePath)
-        .sort() ?? [];
-    if (paths.length === 0) {
-      throw new Error('되돌릴 풀이 외 추적 파일 변경이 없습니다.');
-    }
-    const confirmation = '변경 되돌리기';
-    const selected = await vscode.window.showWarningMessage(
-      `풀이 외 추적 파일 ${paths.length}개의 변경을 되돌립니다.`,
-      {
-        modal: true,
-        detail: `${paths.join('\n')}\n\n풀이 파일과 untracked 파일은 보존됩니다.`,
-      },
-      confirmation,
-    );
-    if (selected !== confirmation) {
-      return;
-    }
-    await this.gitStatusService.discardOtherTrackedChanges(
-      vscode.Uri.parse(rootUri),
-      this.submissionSolutions(repository),
-      paths,
-    );
-    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
+    return this.submissionCommands.discardOtherTrackedChanges(rootUri);
   }
 
   /** 신뢰·저장소·복귀 가능 여부를 확인해 main 복귀·동기화 후 Git·원격 상태를 갱신합니다. */
   async returnToMainAndSync(rootUri: string): Promise<void> {
-    this.requireTrustedWorkspace('main으로 돌아가려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const repository = this.requireSubmissionRepository(rootUri, true);
-    if (!repository.submission?.canReturnToMain) {
-      throw new Error('병합 완료와 깨끗한 Git 상태를 확인한 뒤 main으로 돌아가 주세요.');
-    }
-    await this.gitStatusService.returnToMainAndSync(
-      vscode.Uri.parse(rootUri),
-      this.submissionSolutions(repository),
-    );
-    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
+    return this.submissionCommands.returnToMainAndSync(rootUri);
   }
 
   /** 로컬 Git 상태와 원격 제출 정보를 모두 강제로 다시 읽습니다. */
   async refreshSubmission(): Promise<void> {
-    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
+    return this.submissionCommands.refreshSubmission();
   }
 
   /** GitHub 로그인을 요청하고 성공했을 때 Git·원격 상태를 다시 읽습니다. */
   async signInGitHub(): Promise<void> {
-    const signedIn = await this.gitStatusService.signInGitHub();
-    if (!signedIn) {
-      return;
-    }
-    await this.repositoryRefreshSession.refreshGitStatuses(true, true);
+    return this.submissionCommands.signInGitHub();
   }
 
   /** 하위 세션·서비스 구독을 해제하고 화면 상태 이벤트 발행기를 종료합니다. */
@@ -551,93 +470,7 @@ export class StudyController implements vscode.Disposable {
 
   /** 현재 목록에 없는 URI로 파일 작업을 요청하면 중단합니다. */
   private requireSolution(uri: string) {
-    const target = this.findSolution(uri);
-    if (!target) {
-      throw new Error('요청한 풀이가 현재 워크스페이스에 없습니다.');
-    }
-    return target;
-  }
-
-  /** 현재 목록에서 URI와 일치하는 풀이의 소속 정보를 찾으며 없으면 undefined입니다. */
-  private findSolution(uri: string):
-    | {
-        rootUri: string;
-        slug: string;
-        week?: number;
-        name: string;
-        uri: string;
-      }
-    | undefined {
-    for (const repository of this.snapshot.repositories) {
-      for (const problem of repository.problems) {
-        const solution = problem.solutions.find((item) => item.uri === uri);
-        if (solution) {
-          return {
-            rootUri: repository.rootUri,
-            slug: problem.slug,
-            week: problem.week,
-            name: solution.name,
-            uri: solution.uri,
-          };
-        }
-      }
-    }
-    return undefined;
-  }
-
-  /** 저장소의 문제별 풀이를 주차·slug가 포함된 제출 대상 목록으로 펼칩니다. */
-  private submissionSolutions(repository: RepositorySnapshot) {
-    return repository.problems.flatMap((problem) =>
-      problem.solutions.map((solution) => ({
-        name: solution.name,
-        uri: solution.uri,
-        slug: problem.slug,
-        week: problem.week,
-      })),
-    );
-  }
-
-  /** 워크스페이스가 신뢰되지 않으면 전달받은 안내 메시지로 오류를 던집니다. */
-  private requireTrustedWorkspace(message: string): void {
-    if (!vscode.workspace.isTrusted) {
-      throw new Error(message);
-    }
-  }
-
-  /**
-   * 화면에서 알고 있는 포크와 제출 상태로 명령의 사전 조건을 확인합니다.
-   * 이 결과를 장기 보관하거나 Git 쓰기의 유일한 근거로 사용하지 않습니다.
-   * @param allowBlocked 스테이징 해제·복구 등 차단 상태에서도 필요한 명령인지 여부.
-   * @throws 등록되지 않은 저장소, 확인되지 않은 포크 또는 허용되지 않은 차단 상태.
-   */
-  private requireSubmissionRepository(rootUri: string, allowBlocked = false): RepositorySnapshot {
-    const repository = this.snapshot.repositories.find((item) => item.rootUri === rootUri);
-    if (!repository) {
-      throw new Error('요청한 저장소가 현재 워크스페이스에 없습니다.');
-    }
-    if (repository.submission?.fork.status !== 'verified') {
-      throw new Error(
-        repository.submission?.fork.reason ??
-          'DaleStudy/leetcode-study 포크에서만 제출 기능을 사용할 수 있습니다.',
-      );
-    }
-    if (!allowBlocked && repository.submission.status === 'blocked') {
-      throw new Error(repository.submission.blockedReason ?? '제출 상태를 먼저 정리해 주세요.');
-    }
-    return repository;
-  }
-
-  /** 주차가 없거나 활성 제출 주차와 다르면 작업을 중단하는 오류를 던집니다. */
-  private validateSubmissionWeek(repository: RepositorySnapshot, week: number | undefined): void {
-    if (!week) {
-      throw new Error('풀이의 주차를 확인할 수 없습니다.');
-    }
-    const activeWeek = repository.submission?.activeSubmissionWeek;
-    if (activeWeek !== undefined && activeWeek !== week) {
-      throw new Error(
-        `Week ${activeWeek} 제출이 끝나기 전에는 Week ${week} 풀이를 커밋에 추가할 수 없습니다.`,
-      );
-    }
+    return requireSolution(this.snapshot, uri);
   }
 
   /** 저장소 URI와 slug를 NUL 문자로 구분해 문제별 선택 이력 키를 만듭니다. */

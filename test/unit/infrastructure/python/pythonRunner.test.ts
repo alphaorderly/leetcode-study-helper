@@ -1,5 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 interface DatasetProblem {
@@ -196,5 +198,32 @@ describe('Python runner execution contract', () => {
     expect(result).toMatchObject({ ok: true, outcome: 'passed', stderr: 'diagnostic\n' });
     expect(String(result.stdout).length).toBeLessThan(1000100);
     expect(result.stdout).toContain('출력이 1MB에서 잘렸습니다.');
+  });
+});
+
+describe('Python bundled module loading', () => {
+  it('runs in isolated mode from a different working directory', () => {
+    const data = dataset.problems['two-sum']!;
+    const result = spawnSync(
+      'python3',
+      ['-I', '-u', resolve('resources/python/leetcode_runner.py')],
+      {
+        cwd: tmpdir(),
+        input: JSON.stringify({
+          mode: 'run',
+          source:
+            'class Solution:\n    def twoSum(self, nums, target):\n        seen = {}\n        for i, value in enumerate(nums):\n            if target - value in seen: return [seen[target - value], i]\n            seen[value] = i',
+          filename: 'solution.py',
+          slug: 'two-sum',
+          entryPoint: data.entryPoint,
+          requiredObjects: data.requiredObjects,
+          test: data.test,
+          candidateId: 'c0m0',
+        }),
+        encoding: 'utf8',
+      },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, outcome: 'passed' });
   });
 });

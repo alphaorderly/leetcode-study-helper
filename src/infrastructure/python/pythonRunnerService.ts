@@ -100,6 +100,7 @@ function cancellationError(): Error {
  * 워크스페이스 신뢰와 현재 파일 선택은 상위 세션이 확인합니다.
  */
 export class PythonRunnerService implements vscode.Disposable {
+  /** 이 서비스가 시작해 아직 정리하지 않은 자식 프로세스입니다. 개별 완료 시 제거하고 dispose에서 남은 프로세스를 종료합니다. */
   private readonly processes = new Set<ReturnType<typeof spawn>>();
 
   /** 포함된 Python 실행기를 찾을 확장 리소스 URI를 보관합니다. */
@@ -216,10 +217,15 @@ export class PythonRunnerService implements vscode.Disposable {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       this.processes.add(child);
+      /** 러너의 JSON 응답 바이트입니다. 사용자 print 출력은 JSON 안에 캡처되며 여기서는 프로토콜 응답 전체를 모읍니다. */
       const stdoutChunks: Buffer[] = [];
+      /** 러너 자체의 오류 출력입니다. 비정상 종료 설명에 사용하며 stdout의 JSON 파싱과 섞지 않습니다. */
       const stderrChunks: Buffer[] = [];
+      /** 청크 개수가 아닌 누적 바이트 수로 응답 상한을 검사하고 최종 Buffer 조립 크기를 지정합니다. */
       let stdoutBytes = 0;
+      /** stderr도 별도 상한으로 추적해 오류 출력이 무한히 쌓이지 않도록 합니다. */
       let stderrBytes = 0;
+      /** error·close·취소·시간 초과가 겹쳐도 Promise 완료와 정리를 한 번만 수행하기 위한 플래그입니다. */
       let settled = false;
 
       /** 타이머·취소 구독·프로세스 추적을 정리하고 Promise를 한 번만 완료합니다. */
@@ -238,6 +244,7 @@ export class PythonRunnerService implements vscode.Disposable {
         child.kill();
         finish(() => reject(cancellationError()));
       };
+      /** 프로세스 시작부터의 시간 제한입니다. 종료 경로는 finish를 거쳐 이 타이머와 취소 구독을 해제합니다. */
       const timer = setTimeout(() => {
         child.kill();
         finish(() => reject(new Error('Python 테스트가 10초 제한 시간을 초과했습니다.')));

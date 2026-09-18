@@ -40,11 +40,14 @@ export class SubmissionGuards {
     const repository = await this.repositoryAdapter.requireRepository(repositoryRoot);
     await repository.status();
     this.requireCleanOperationState(repository);
+    /** 포크 신원 조회 전에 대상 URL을 기억합니다. 응답이 와도 그동안 origin이 바뀌었다면 기존 검증은 사용할 수 없습니다. */
     const origin = this.requireOrigin(repository);
+    /** 신원 확인과 Git 작업 가능 여부는 별개입니다. verified 이후에도 status와 origin을 다시 확인합니다. */
     const identity = await this.githubClient.getForkIdentity(origin, forceIdentity);
     if (identity.status !== 'verified') {
       throw new Error(identity.reason ?? 'DaleStudy 포크를 확인할 수 없습니다.');
     }
+    /** 원격 응답을 기다리는 동안 생긴 Git 변경을 다시 읽습니다. 이 검사는 호출부의 작업별 index·이력 검사를 대체하지 않습니다. */
     await repository.status();
     this.requireCleanOperationState(repository);
     this.requireUnchangedOrigin(repository, origin);

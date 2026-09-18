@@ -1,0 +1,442 @@
+.group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 22px;
+  margin: 0 -8px;
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--ui-border);
+  background: var(--ui-surface);
+}
+
+.group-title {
+  color: var(--vscode-foreground);
+  font-size: 1.2em;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+
+.group-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--ui-border);
+  border-radius: 2px;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  font-size: 0.76em;
+  text-align: center;
+}
+
+.problem-card {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  padding: 9px;
+  border-radius: 2px;
+  background: var(--ui-surface);
+  transition:
+    opacity 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.problem-card.incomplete {
+  opacity: 0.55;
+}
+
+.problem-card:has(.problem-card-action:hover:not(:disabled)),
+.problem-card:has(.problem-card-action:focus-visible) {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-surface-hover);
+}
+
+.problem-card.incomplete:has(.problem-card-action:hover:not(:disabled)),
+.problem-card.incomplete:has(.problem-card-action:focus-visible) {
+  opacity: 0.72;
+}
+
+.problem-card-action {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.problem-heading,
+.solution-actions {
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.problem-heading {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.problem-badges {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.problem-title {
+  overflow-wrap: anywhere;
+  font-size: 1em;
+}
+
+.difficulty {
+  padding: 1px 5px;
+  border: 1px solid var(--ui-border);
+  border-radius: 2px;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  font-size: 0.76em;
+}
+
+.difficulty.easy {
+  color: color-mix(in srgb, var(--vscode-foreground) 72%, #278657);
+  background: color-mix(in srgb, #a8e6c1 32%, var(--ui-surface));
+  border-color: color-mix(in srgb, #72c99a 58%, var(--ui-border));
+}
+
+.difficulty.medium {
+  color: color-mix(in srgb, var(--vscode-foreground) 76%, #9a7200);
+  background: color-mix(in srgb, #ffe39a 35%, var(--ui-surface));
+  border-color: color-mix(in srgb, #e5bd53 58%, var(--ui-border));
+}
+
+.difficulty.hard {
+  color: color-mix(in srgb, var(--vscode-foreground) 72%, #b34d68);
+  background: color-mix(in srgb, #f4b8c7 32%, var(--ui-surface));
+  border-color: color-mix(in srgb, #dc849b 58%, var(--ui-border));
+}
+
+.difficulty.unknown {
+  background: color-mix(in srgb, #c9c2e8 28%, var(--ui-surface));
+  border-color: color-mix(in srgb, #aaa0d5 52%, var(--ui-border));
+}
+
+.problem-group.difficulty-easy > .group-header {
+  background: color-mix(in srgb, #a8e6c1 20%, var(--ui-surface));
+}
+
+.problem-group.difficulty-medium > .group-header {
+  background: color-mix(in srgb, #ffe39a 22%, var(--ui-surface));
+}
+
+.problem-group.difficulty-hard > .group-header {
+  background: color-mix(in srgb, #f4b8c7 20%, var(--ui-surface));
+}
+
+.problem-group.difficulty-unknown > .group-header {
+  background: color-mix(in srgb, #c9c2e8 18%, var(--ui-surface));
+}
+
+.solution-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.solution-status {
+  min-height: 24px;
+  padding: 3px 7px;
+  border-radius: 2px;
+}
+
+.delete-button,
+.other-solution-button,
+.answer-button,
+.open-page-button,
+.stage-button {
+  display: inline-flex;
+  position: relative;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: 2px;
+}
+
+.solution-file-section {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 5px;
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px solid var(--ui-border);
+  pointer-events: auto;
+}
+
+.solution-file-label {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.78em;
+  font-weight: 600;
+}
+
+.solution-file-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.solution-button {
+  min-height: 24px;
+  padding: 2px 7px;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  border-color: var(--ui-border);
+  font-size: 0.84em;
+  white-space: nowrap;
+}
+
+.solution-button.preferred {
+  color: var(--vscode-foreground);
+  background: var(--ui-surface-muted);
+  border-color: var(--ui-border-strong);
+}
+
+.solution-button:hover:not(:disabled) {
+  color: var(--vscode-foreground);
+  background: var(--ui-surface-hover);
+  border-color: var(--ui-border-strong);
+}
+
+.trash-icon,
+.users-round-icon,
+.book-open-icon,
+.external-link-icon,
+.git-stage-icon {
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+
+.solution-status {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--ui-border);
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  font-size: 0.92em;
+}
+
+.solution-status.has-file {
+  color: var(--vscode-foreground);
+  background: var(--ui-surface-muted);
+  border-color: var(--ui-border-strong);
+}
+
+.solution-status.no-file {
+  border-style: dashed;
+}
+
+.solution-status-copy {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 7px;
+  align-items: center;
+  min-width: 0;
+}
+
+.solution-file-name {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--vscode-foreground);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.solution-git-status,
+.solution-create-hint {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.84em;
+  white-space: nowrap;
+}
+
+.solution-git-status {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.solution-git-status::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+}
+
+.solution-git-status.pushed {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #4f9d69);
+}
+
+.solution-git-status.unpushed {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #d0a03a);
+}
+
+.solution-git-status.working,
+.solution-git-status.staged-outdated,
+.solution-git-status.push-needed,
+.solution-git-status.pr-needed,
+.solution-git-status.sync-needed {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #d0a03a);
+}
+
+.solution-git-status.staged,
+.solution-git-status.pr-open {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #4f9d69);
+}
+
+.solution-git-status.merged {
+  color: var(--vscode-testing-iconPassed, #4f9d69);
+}
+
+.solution-git-status.conflict {
+  color: var(--vscode-errorForeground);
+}
+
+.solution-git-status.checking,
+.solution-git-status.unknown {
+  color: var(--vscode-descriptionForeground);
+}
+
+.solution-action-buttons {
+  display: flex;
+  gap: 5px;
+  margin-left: auto;
+  pointer-events: auto;
+}
+
+.solution-action-buttons [data-tooltip]::after {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  bottom: calc(100% + 5px);
+  width: max-content;
+  max-width: 220px;
+  padding: 4px 6px;
+  visibility: hidden;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 2px;
+  opacity: 0;
+  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  background: var(--vscode-editorHoverWidget-background, var(--ui-surface));
+  box-shadow: 0 2px 7px rgb(0 0 0 / 22%);
+  content: attr(data-tooltip);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  pointer-events: none;
+  text-align: left;
+  white-space: normal;
+  transition:
+    opacity 100ms ease,
+    visibility 100ms ease;
+}
+
+.solution-action-buttons [data-tooltip]:hover::after,
+.solution-action-buttons [data-tooltip]:focus-visible::after {
+  visibility: visible;
+  opacity: 1;
+}
+
+.delete-button,
+.other-solution-button,
+.answer-button,
+.open-page-button,
+.stage-button {
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+  border-color: var(--ui-border);
+}
+
+.delete-button:hover:not(:disabled),
+.other-solution-button:hover:not(:disabled),
+.answer-button:hover:not(:disabled),
+.open-page-button:hover:not(:disabled),
+.stage-button:hover:not(:disabled),
+.stage-button.active {
+  color: var(--vscode-foreground);
+  background: var(--ui-surface-hover);
+  border-color: var(--ui-border-strong);
+}
+
+.file-icon {
+  position: relative;
+  width: 10px;
+  height: 12px;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+}
+
+.file-icon::after {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  left: 2px;
+  height: 1px;
+  background: currentColor;
+  box-shadow: 0 3px 0 currentColor;
+  content: '';
+}
+
+.empty-state,
+.issue {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed var(--ui-border-strong);
+  border-radius: 2px;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.45;
+}
+
+.issue {
+  color: var(--vscode-errorForeground);
+  border-style: solid;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.solution-file-item {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.solution-file-stage-button {
+  width: 22px;
+  min-width: 22px;
+  min-height: 22px;
+}

@@ -31,7 +31,9 @@ export type { SubmissionSolution } from './submissionFiles';
  * await 사이에 저장소가 바뀔 수 있으므로 조회 전 검사와 쓰기 직전 검사를 모두 유지합니다.
  */
 export class SubmissionActions {
+  /** 실제 상태를 읽어 검증하는 공통 경계입니다. 이 객체에는 이전 요청의 허용 결과를 보관하지 않습니다. */
   private readonly guards: SubmissionGuards;
+  /** 브랜치 생성·전환·동기화의 실행 순서를 위임합니다. 이후 커밋·push 직전 검증은 현재 명령이 다시 수행합니다. */
   private readonly branches: SubmissionBranches;
 
   /** 제출 검증기와 브랜치 관리기를 구성해 Git 작업의 검증·실행 흐름을 연결합니다. */
@@ -103,7 +105,9 @@ export class SubmissionActions {
     solutions: readonly SubmissionSolution[],
   ): Promise<void> {
     const repository = await this.guards.requireSubmissionMutation(repositoryRoot, false);
+    /** 네트워크 조회와 브랜치 전환 전에 확인한 대상입니다. 마지막 검증에서 URL이 달라지지 않았는지 비교합니다. */
     const verifiedOrigin = this.guards.requireOrigin(repository);
+    /** 사용자가 선택한 파일 경로와 주차를 고정합니다. 실제 index를 다시 읽더라도 기대 범위를 바꾸지 않습니다. */
     const { normalizedMessage, expectedPaths, week, submissionBranch } = validateCommitInput(
       message,
       expectedFiles,
@@ -116,6 +120,7 @@ export class SubmissionActions {
     }
     this.requireCommitFiles(repository, expectedPaths);
     const fileByPath = submissionFilesByPath(repository, solutions);
+    /** 이번 커밋의 이력 검사 기준 ref입니다. main에서 시작하면 동기화·브랜치 생성 결과를, 주차 브랜치에서는 fetch 결과를 사용합니다. */
     let canonicalMain: string;
     if (currentBranch === 'main') {
       canonicalMain = await this.branches.requireSynchronizedMain(repository, solutions);
@@ -126,6 +131,7 @@ export class SubmissionActions {
         fileByPath,
         canonicalMain,
       );
+      /** checkout 전후 index가 사용자의 선택과 같은지 검사합니다. 다른 파일이 생겨도 선택 범위를 자동 확장하지 않습니다. */
       const refreshedIndexPaths = relativeChangePaths(
         repository.rootUri,
         repository.state.indexChanges,
@@ -143,6 +149,7 @@ export class SubmissionActions {
         fileByPath,
       );
     }
+    /** ref 이름은 다음 await 동안 이동할 수 있으므로 현재 SHA를 따로 기억해 마지막 검증에서 비교합니다. */
     const canonicalCommit = (await repository.getCommit(canonicalMain)).hash;
     await repository.status();
     await this.revalidateCommit(repository, {
@@ -186,6 +193,7 @@ export class SubmissionActions {
     if (remoteBranch) await this.requirePushAhead(repository, submissionBranch);
 
     const fileByPath = submissionFilesByPath(repository, solutions);
+    /** 이미 원격 주차 브랜치가 있으면 그 이후 커밋만 검사합니다. 첫 push는 공식 main 이후 전체 주차 이력을 검사합니다. */
     const baseRef = remoteBranch ? `origin/${submissionBranch}` : canonicalMain;
     const pendingWeek = await this.requirePendingPushWeek(
       repository,
@@ -199,7 +207,9 @@ export class SubmissionActions {
     const remote = await this.githubClient.getRemoteSubmission(origin, submissionBranch, true);
     this.requireRemotePushWeek(remote, submissionBranch, pendingWeek, fileByPath);
 
+    /** 원격 조회를 마친 뒤의 로컬 HEAD를 다음 fetch 전 기대값으로 잡습니다. 재검증은 이 시점 이후 이동 여부를 확인합니다. */
     const expectedHead = repository.state.HEAD?.commit;
+    /** 첫 조회의 원격 주차 tip입니다. undefined는 첫 push 후보이며 재조회 때 브랜치가 생긴 경우도 변경으로 취급합니다. */
     const expectedRemoteCommit = remoteBranch?.commit;
     if (!expectedHead) {
       throw new Error('push할 HEAD 커밋을 확인할 수 없습니다.');
@@ -545,6 +555,7 @@ export class SubmissionActions {
     if (!remote.latestPullRequest || pullRequestStatus(remote.latestPullRequest) !== 'merged') {
       throw new Error('병합 완료된 주차 PR만 main으로 돌아가 동기화할 수 있습니다.');
     }
+    /** 이전 검증을 통과한 후 main으로 전환합니다. 이어지는 동기화가 실패해도 이전 주차 브랜치로 자동 복귀하지 않습니다. */
     await repository.checkout('main');
     await repository.status();
     await this.syncFork(repositoryRoot, solutions);

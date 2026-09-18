@@ -29,26 +29,40 @@ export interface RepositoryRefreshState {
  * 생성 시 파일·Git 이벤트를 구독하고 dispose에서 구독과 예약 타이머를 해제합니다.
  */
 export class RepositoryRefreshSession implements vscode.Disposable {
+  /** 최신 저장소 배열과 탐색 오류를 함께 게시합니다. 컨트롤러가 이 이벤트로 전체 화면 상태를 조립합니다. */
   private readonly changeEmitter = new vscode.EventEmitter<RepositoryRefreshState>();
+  /** Git·워크스페이스 이벤트와 달리 파일 감시기는 재구성할 수 있어 watchers에서 별도로 관리합니다. */
   private readonly disposables: vscode.Disposable[] = [];
+  /** 현재 워크스페이스 루트의 카탈로그·풀이 감시기입니다. 루트 변경 때 기존 감시기를 해제하고 다시 만듭니다. */
   private watchers: vscode.FileSystemWatcher[] = [];
+  /** 전체 파일 탐색의 실행과 예약입니다. 실행 중 요청은 같은 Promise를 기다리며 별도 후속 요청을 쌓지 않습니다. */
   private readonly fullRefresh = {
+    /** 진행 중 전체 탐색이 없으면 undefined입니다. 탐색 종료의 finally에서 비워 다음 요청을 허용합니다. */
     running: undefined as Promise<RepositoryRefreshState> | undefined,
     task: new TrailingTask(REFRESH_DEBOUNCE_MS, () => void this.refresh(this.getNickname())),
   };
+  /** Git 조회는 전체 탐색과 달리 실행 중 새 요청을 누적하여 후속 회차에서 처리합니다. */
   private readonly gitRefresh = {
     running: undefined as Promise<void> | undefined,
+    /** 다음 조회 회차가 필요하다는 표시입니다. 각 회차 시작에서 소비하며 조회 중 들어온 요청은 다시 true로 남습니다. */
     requested: false,
+    /** 대기 요청 중 하나라도 로컬 status 강제 조회를 요구하면 유지합니다. 회차 시작에 소비하고 기준 배열이 바뀌면 복원합니다. */
     forceStatus: false,
+    /** 대기 요청의 원격 캐시 우회 요구를 누적합니다. 약한 요청이 뒤에 와도 이미 요청한 강도를 낮추지 않습니다. */
     forceRemote: false,
     task: new TrailingTask(REFRESH_DEBOUNCE_MS, () => void this.refreshGitStatuses()),
   };
+  /** 문제별 갱신은 루트 URI와 slug를 키로 합칩니다. 예약 목록과 현재 실행 목록은 수명이 달라 별도로 둡니다. */
   private readonly problemRefresh = {
+    /** 다음 예약 실행이 가져갈 문제 목록입니다. 실행 시작 전에 비워 실행 중 추가된 변경을 다음 예약에 남깁니다. */
     pending: new Map<string, PendingProblemRefresh>(),
+    /** 같은 문제의 중복 조회가 함께 기다릴 Promise입니다. 다른 문제는 서로 다른 키로 추적합니다. */
     running: new Map<string, Promise<void>>(),
     task: new TrailingTask(REFRESH_DEBOUNCE_MS, () => void this.drainProblemRefreshes()),
   };
+  /** 첫 전체 탐색이 게시되기 전 Git 이벤트로 불완전한 목록을 조회하지 않도록 하는 플래그입니다. */
   private initialized = false;
+  /** 마지막 게시 결과입니다. repositories 배열의 참조는 Git 조회 결과를 적용해도 되는지 판단하는 버전 역할도 합니다. */
   private state: RepositoryRefreshState = {
     repositories: [],
     issues: [],
@@ -246,6 +260,7 @@ export class RepositoryRefreshSession implements vscode.Disposable {
       if (this.fullRefresh.running) {
         await this.fullRefresh.running;
       }
+      /** 이 조회의 기준 배열을 잡습니다. await 중 전체·부분 갱신이 배열을 교체하면 결과를 적용하지 않고 다시 조회합니다. */
       const sourceRepositories = this.state.repositories;
       const repositories = await this.withGitStatuses(sourceRepositories, forceStatus, forceRemote);
       if (this.state.repositories === sourceRepositories) {

@@ -1,0 +1,203 @@
+.current-problem {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.problem-detail-header {
+  display: grid;
+  gap: 8px;
+}
+
+.problem-detail-title-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.problem-detail-title {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 1.15em;
+  line-height: 1.35;
+}
+
+.problem-page-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.problem-detail-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.problem-topic-tag {
+  padding: 1px 5px;
+  border: 1px solid var(--ui-border);
+  border-radius: 2px;
+  color: var(--vscode-descriptionForeground);
+  background: var(--ui-surface-muted);
+  font-size: 0.76em;
+}
+
+.problem-detail-state {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed var(--ui-border-strong);
+  border-radius: 2px;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.45;
+}
+
+.problem-detail-error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  color: var(--vscode-errorForeground);
+  border-style: solid;
+}
+
+.problem-detail-error p {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+.problem-detail-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+.problem-detail-content > :first-child {
+  margin-top: 0;
+}
+
+.problem-detail-content > :last-child {
+  margin-bottom: 0;
+}
+
+.problem-detail-content pre,
+.problem-detail-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.problem-detail-content pre {
+  padding: 9px;
+  border: 1px solid var(--ui-border);
+  border-radius: 2px;
+  background: var(--ui-surface-muted);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 12px);
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.problem-detail-content code {
+  padding: 1px 3px;
+  border-radius: 2px;
+  background: var(--ui-surface-muted);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.problem-detail-content pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.problem-detail-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.problem-detail-content ul,
+.problem-detail-content ol {
+  padding-left: 22px;
+}
+
+.python-runner {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--ui-border);
+  border-radius: 2px;
+  background: var(--ui-surface-muted);
+}
+
+.runner-title,
+.runner-state {
+  margin: 0;
+}
+
+.runner-title {
+  font-size: 1em;
+}
+
+.runner-controls {
+  display: grid;
+  gap: 6px;
+}
+
+.runner-button {
+  width: 100%;
+}
+
+.runner-state {
+  padding: 8px;
+  border-left: 3px solid var(--ui-border-strong);
+  background: var(--ui-surface);
+  line-height: 1.45;
+}
+
+.runner-passed {
+  color: var(--vscode-testing-iconPassed, #4f9d69);
+  border-left-color: currentColor;
+}
+
+.runner-running {
+  color: var(--vscode-descriptionForeground);
+}
+
+.runner-failed,
+.runner-error,
+.runner-unavailable {
+  color: var(--vscode-errorForeground);
+  border-left-color: currentColor;
+}
+
+.runner-assertion,
+.runner-output pre {
+  max-width: 100%;
+  margin: 7px 0 0;
+  padding: 7px;
+  overflow: auto;
+  border: 1px solid var(--ui-border);
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 12px);
+  white-space: pre-wrap;
+}
+
+.runner-output summary {
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  font-size: 0.84em;
+}
+
+.problem-group {
+  display: grid;
+  gap: 7px;
+  padding: 0 8px 8px;
+  overflow: hidden;
+  border: 1px solid var(--ui-border);
+  border-radius: 2px;
+  background: var(--ui-surface-muted);
+}

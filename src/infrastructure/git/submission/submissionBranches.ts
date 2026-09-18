@@ -58,7 +58,9 @@ export class SubmissionBranches {
     await repository.status();
     this.guards.requireCleanOperationState(repository);
 
+    /** 공식 remote 이름은 upstream으로 고정하지 않습니다. 이후 비교·병합은 확인된 remote의 main을 기준으로 합니다. */
     const canonicalMain = `${canonicalRemote}/main`;
+    /** 병합에 사용한 공식 main SHA입니다. push 직전 재조회로 기준이 바뀌면 같은 동기화 결과로 진행하지 않습니다. */
     const canonicalCommit = (await repository.getCommit(canonicalMain)).hash;
     const canonicalRelation = await getRefRelation(repository, canonicalMain);
     if (canonicalRelation === 'behind' || canonicalRelation === 'diverged') {
@@ -68,6 +70,7 @@ export class SubmissionBranches {
     if (finalOriginRelation !== 'equal' && finalOriginRelation !== 'ahead') {
       throw new Error('동기화 결과가 origin/main에서 이어지지 않아 push하지 않았습니다.');
     }
+    /** origin·공식 main 반영 후의 로컬 결과입니다. 마지막 fetch 중 로컬 HEAD가 바뀌었는지 확인하는 비교값입니다. */
     const expectedHead = repository.state.HEAD?.commit;
     if (!expectedHead) {
       throw new Error('동기화된 main의 HEAD를 확인할 수 없습니다.');
@@ -89,6 +92,7 @@ export class SubmissionBranches {
       await repository.push('origin', 'main', false);
     } catch (error) {
       await repository.status();
+      /** push 실패 시 병합 완료된 로컬 main을 되돌리지 않습니다. 남아 있는 상태를 읽어 재시도 안내를 구성합니다. */
       const recovery = await this.describeSyncRecovery(repository);
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(`origin/main push에 실패했습니다. ${recovery} (${detail})`, {

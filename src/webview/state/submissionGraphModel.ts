@@ -9,14 +9,22 @@ import type { UiState } from './viewTypes';
 
 /** 제출 그래프 렌더에 공유하는 파생 플래그입니다. */
 export interface SubmissionGraphFacts {
+  /** 최근 PR을 우선하며 닫힌 PR도 포함합니다. 없으면 아직 연결할 PR을 확인하지 못한 상태입니다. */
   pullRequest: PullRequestSnapshot | undefined;
+  /** 표시용 커밋 배열 중 pushed=false가 하나라도 있는지입니다. 배열 자체가 비어 있지 않은 것과 다릅니다. */
   hasUnpushed: boolean;
+  /** 원격 상태 조회 실패 여부입니다. 로컬 작업까지 없다는 뜻은 아니므로 그래프 전체를 숨기는 기준으로 쓰지 않습니다. */
   remoteUnavailable: boolean;
+  /** 표시할 차단 사유가 있는지입니다. 원격 조회 실패 상태에서도 로컬 이력 문제로 true일 수 있습니다. */
   blocked: boolean;
   hasStaged: boolean;
+  /** 스테이징(풀이 외 포함) 또는 미푸시 커밋이 있는지입니다. 조회 실패 중에도 남길 화면을 결정합니다. */
   hasLocalWork: boolean;
+  /** 로컬·원격 커밋, 파일, PR 중 타임라인에 표시할 항목이 있는지입니다. 작업 버튼의 허용 여부와는 다릅니다. */
   hasTimeline: boolean;
+  /** 공식 remote 부재 또는 공식 main보다 뒤처진 경우입니다. 동기화 실행 가능 여부는 canSync로 따로 판단합니다. */
   needsOfficialSync: boolean;
+  /** 공식 main보다 뒤처졌지만 동기화할 수 없고 사유도 있을 때만 별도 문제 안내를 표시합니다. */
   showSyncIssue: boolean;
 }
 
@@ -100,6 +108,7 @@ export function submissionGraphLayout(
     };
   }
   const facts = submissionGraphFacts(submission);
+  /** 원격 조회 실패만으로 로컬 커밋·스테이징을 지우지 않습니다. 로컬 작업도 없을 때 안내 전용 화면을 선택합니다. */
   if (submission.status === 'unavailable' && !facts.hasLocalWork) {
     return {
       type: 'auth-only',

@@ -18,7 +18,9 @@ import {
 
 /** 원격 조회 전 수집한 로컬 상태입니다. Git 쓰기를 허용하는 근거로 사용하지 않습니다. */
 export interface LocalSubmissionContext {
+  /** 현재 닉네임으로 발견한 풀이 후보입니다. 원격 비교 파일을 내 풀이와 기타 파일로 분류할 때 기준이 됩니다. */
   files: SubmissionFileSnapshot[];
+  /** 저장소 상대 경로로 후보를 찾는 인덱스입니다. Git·GitHub의 경로와 화면의 URI를 연결합니다. */
   fileByPath: ReadonlyMap<string, SubmissionFileSnapshot>;
   indexPaths: ReadonlySet<string>;
   workingPaths: ReadonlySet<string>;
@@ -31,6 +33,7 @@ export interface LocalSubmissionContext {
   requestedSubmissionBranch: string | undefined;
   canonicalRemoteName: string | undefined;
   local: { commits: SubmissionCommitSnapshot[]; history: LocalSubmissionHistorySnapshot };
+  /** 로컬 커밋에 포함된 경로입니다. 작업 트리·index 상태만으로 미푸시 여부를 놓치지 않도록 합칩니다. */
   pendingPaths: ReadonlySet<string>;
   localStatuses: ReadonlyMap<string, SolutionSubmissionStatus>;
   localBlockedReason: string | undefined;
@@ -168,6 +171,7 @@ export function buildReadySubmission(
     localBlockedReason,
   } = context;
   const { fork, remote, remoteCommits, statuses, pullRequestNumbers, hasCanonicalRemote } = input;
+  /** 단 하나의 열린 PR 등으로 확정한 원격 주차를 먼저 사용하고, 없으면 로컬에서 요청한 브랜치를 사용합니다. */
   const submissionBranch = remote.headBranch ?? requestedSubmissionBranch;
   const forkFiles = remote.compareFiles.flatMap(({ filename }) => {
     const file = fileByPath.get(filename);
@@ -176,6 +180,7 @@ export function buildReadySubmission(
   const otherForkFiles = remote.compareFiles
     .map(({ filename }) => filename)
     .filter((filename) => !fileByPath.has(filename));
+  /** 같은 SHA가 양쪽에 있으면 pushed 정보를 우선합니다. 결과에는 로컬 미푸시와 원격 반영 커밋이 함께 있습니다. */
   const commits = mergeSubmissionCommits(remoteCommits, local.commits);
   const { activeSubmissionWeek, mixedWeeks } = activeSubmissionScope(
     stagedFiles,
@@ -196,6 +201,7 @@ export function buildReadySubmission(
     remote.openPullRequestCount === 1 &&
     requestedSubmissionBranch !== undefined &&
     remote.headBranch !== requestedSubmissionBranch;
+  /** 복수 문제가 있어도 먼저 해결할 사유 하나를 선택합니다. 아래 함수의 분기 순서가 화면 안내의 우선순위입니다. */
   const blockedReason = describeSubmissionBlock({
     localBlockedReason,
     remote,
@@ -380,6 +386,7 @@ function submissionPermissions(context: LocalSubmissionContext, input: ReadySubm
     hasUntrackedChanges,
   } = input;
   const blocksForkSync = trackedFilesBlockSync(blockingTrackedFiles);
+  /** 포크 동기화는 풀이의 작업 트리 수정까지 모두 금지하지 않습니다. 추적 파일 분류와 미푸시 main 상태로 판단합니다. */
   const canSync =
     branch === 'main' && !blocksForkSync && !rebaseInProgress && !hasBlockingOriginCommits;
   const syncDisabledReason = describeSyncDisabledReason(
@@ -391,6 +398,7 @@ function submissionPermissions(context: LocalSubmissionContext, input: ReadySubm
   const latestPullRequestStatus = remote.latestPullRequest
     ? pullRequestStatus(remote.latestPullRequest)
     : undefined;
+  /** 주차 브랜치에서 main으로 이동하는 조건은 더 엄격합니다. 병합 완료뿐 아니라 untracked 포함 작업 상태도 확인합니다. */
   const canReturnToMain =
     currentBranchWeek !== undefined &&
     latestPullRequestStatus === 'merged' &&

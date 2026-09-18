@@ -1,0 +1,227 @@
+.submission-view {
+  display: grid;
+  gap: 10px;
+}
+
+.submission-auth {
+  display: grid;
+  gap: 10px;
+}
+
+.submission-view-header {
+  display: grid;
+  gap: 8px;
+}
+
+.submission-view-title-group {
+  display: grid;
+  gap: 2px;
+}
+
+.submission-view-title,
+.submission-view-description {
+  margin: 0;
+}
+
+.submission-view-title {
+  font-size: 1.05em;
+}
+
+.submission-view-description {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.84em;
+  line-height: 1.4;
+}
+
+.submission-view-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.submission-header-button {
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 0.84em;
+}
+
+.submission-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border: 1px solid var(--ui-border);
+  border-radius: 2px;
+}
+
+.submission-summary-item {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 2px;
+  text-align: center;
+}
+
+.submission-summary-item + .submission-summary-item {
+  border-left: 1px solid var(--ui-border);
+}
+
+.submission-summary-count {
+  color: var(--vscode-foreground);
+  font-size: 0.9em;
+  font-weight: 650;
+}
+
+.submission-summary-label {
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.68em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.submission-graph {
+  --submission-rail-x: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.submission-node {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 7px;
+  padding-bottom: 10px;
+}
+
+.submission-node:not(:last-child)::before {
+  position: absolute;
+  top: 16px;
+  bottom: -2px;
+  left: var(--submission-rail-x);
+  width: 1px;
+  background: var(--ui-border-strong);
+  content: '';
+}
+
+.submission-node-marker {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  margin: 7px 0 0 5px;
+  border: 2px solid var(--vscode-descriptionForeground);
+  border-radius: 50%;
+  background: var(--vscode-sideBar-background);
+}
+
+.submission-node.complete .submission-node-marker,
+.submission-node.pushed .submission-node-marker,
+.submission-node.pull-request .submission-node-marker {
+  background: var(--vscode-descriptionForeground);
+}
+
+.submission-node.pending .submission-node-marker,
+.submission-node.local .submission-node-marker,
+.submission-node.staged .submission-node-marker {
+  border-color: var(--vscode-gitDecoration-modifiedResourceForeground, #d0a03a);
+}
+
+.submission-node-body {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--ui-border);
+  border-radius: 2px;
+  background: var(--ui-surface-muted);
+}
+
+.submission-node-header {
+  display: grid;
+  gap: 2px;
+}
+
+.submission-node-title {
+  overflow: hidden;
+  color: var(--vscode-foreground);
+  font-size: 0.9em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.submission-node-description {
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.76em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.submission-file-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.submission-file {
+  position: relative;
+  overflow: hidden;
+  padding: 3px 5px 3px 13px;
+  border-left: 1px solid var(--ui-border-strong);
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.72em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.submission-file::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 8px;
+  height: 1px;
+  background: var(--ui-border-strong);
+  content: '';
+}
+
+.submission-action-button {
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 7px;
+  font-size: 0.82em;
+}
+
+.submission-commit-input {
+  min-height: 27px;
+  font-size: 0.82em;
+}
+
+.submission-other-files {
+  color: var(--vscode-errorForeground);
+  font-size: 0.78em;
+}
+
+.submission-other-files summary {
+  cursor: pointer;
+}
+
+.submission-blocked {
+  margin-bottom: 8px;
+}
+
+.submission-empty {
+  margin-top: 2px;
+}
+
+@media (max-width: 260px) {
+  .submission-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .submission-summary-item + .submission-summary-item {
+    border-left: 0;
+  }
+}
