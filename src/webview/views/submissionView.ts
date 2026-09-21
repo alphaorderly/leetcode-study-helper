@@ -1,4 +1,4 @@
-import type { RepositorySnapshot } from '../../shared/contracts';
+import type { PreparationAction, RepositorySnapshot } from '../../shared/contracts';
 import { actionButton } from '../components/controls';
 import { element } from '../components/dom';
 import {
@@ -110,6 +110,66 @@ export function renderSubmissionView(context: ViewContext, rerender: () => void)
       rerender();
     });
     section.append(select);
+  }
+  const preparation = repository.submission?.preparation;
+  if (preparation) {
+    const panel = element('div', 'submission-auth');
+    const phases: Record<string, string> = {
+      preserve: '작업 보관',
+      main: 'main 준비',
+      sync: '공식 main 동기화',
+      push: 'origin 반영',
+      target: '다음 주차 브랜치 준비',
+      apply: '풀이 이동',
+      applying: '풀이 이동·충돌 확인',
+      done: '준비 완료',
+      cancelled: '원본 복원 완료',
+    };
+    panel.append(element('h3', undefined, phases[preparation.phase] ?? '다음 주차 준비'));
+    panel.append(
+      element(
+        'p',
+        undefined,
+        `${preparation.sourceBranch} → ${preparation.targetWeek ? `Week ${preparation.targetWeek}` : 'main'} · 보관 파일 ${preparation.files.length}개`,
+      ),
+    );
+    if (preparation.error) panel.append(element('p', 'issue', preparation.error));
+    /** 보관 작업 ID와 저장소를 명령에 고정합니다. */
+    const button = (label: string, action: PreparationAction) =>
+      actionButton({
+        label,
+        className: 'secondary-button',
+        disabled: ui.busy,
+        onClick: () =>
+          context.post({
+            type: 'preparationAction',
+            rootUri: repository.rootUri,
+            operationId: preparation.id,
+            action,
+          }),
+      });
+    if (!preparation.completed) {
+      if (preparation.phase === 'target' && preparation.targetWeek)
+        panel.append(button('기존 주차 작업 열기', 'existingWeek'));
+      if (preparation.conflicts.length)
+        panel.append(button(`충돌 해결 (${preparation.conflicts.length})`, 'conflicts'));
+      panel.append(
+        button(preparation.error ? '해결 후 계속 / 재시도' : '계속', 'continue'),
+        button('취소하고 원본 복원', 'cancel'),
+      );
+    }
+    panel.append(button('보관함 열기', 'shelf'));
+    if (preparation.completed) panel.append(button('보관 기록 정리', 'cleanup'));
+    section.append(panel);
+  }
+  if (repository.submission?.mergedCurrentBranch && !preparation?.completed) {
+    section.append(
+      element(
+        'p',
+        'empty-state',
+        '제출이 완료되었습니다. 다음 주차 준비에서 작성 중인 풀이를 보존하고 main을 동기화할 수 있습니다.',
+      ),
+    );
   }
   section.append(renderSubmissionSummary(repository), renderSubmissionGraph(repository, context));
   return section;

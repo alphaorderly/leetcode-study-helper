@@ -552,4 +552,66 @@ describe('webview submission', () => {
       rootUri: 'file:///study-a',
     });
   });
+  it('offers next-week preparation for a merged branch with draft work', () => {
+    const post = vi.fn();
+    const state = submissionSnapshot();
+    Object.assign(state.repositories[0]!.submission!, {
+      branch: 'week-01',
+      mergedCurrentBranch: true,
+      canReturnToMain: false,
+    });
+    ui.viewMode = 'submission';
+    renderApp(root, state, ui, post);
+    const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === '다음 주차 준비',
+    );
+    expect(button?.disabled).toBe(false);
+    button?.click();
+    expect(post).toHaveBeenCalledWith({ type: 'prepareNextWeek', rootUri: 'file:///study-a' });
+  });
+
+  it('keeps conflict recovery and shelf actions accessible while remote lookup is unavailable', () => {
+    const post = vi.fn();
+    const state = submissionSnapshot();
+    Object.assign(state.repositories[0]!.submission!, {
+      status: 'unavailable',
+      preparation: {
+        id: 'operation-id',
+        phase: 'applying',
+        sourceBranch: 'week-01',
+        targetWeek: 2,
+        completed: false,
+        files: ['two-sum/CaseUser.py'],
+        conflicts: ['two-sum/CaseUser.py'],
+        error: '복원 충돌',
+      },
+    });
+    ui.viewMode = 'submission';
+    renderApp(root, state, ui, post);
+    expect(root.textContent).toContain('복원 충돌');
+    for (const label of [
+      '충돌 해결 (1)',
+      '해결 후 계속 / 재시도',
+      '취소하고 원본 복원',
+      '보관함 열기',
+    ]) {
+      const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent === label,
+      );
+      expect(button?.disabled).toBe(false);
+      button?.click();
+    }
+    expect(post).toHaveBeenCalledWith({
+      type: 'preparationAction',
+      rootUri: 'file:///study-a',
+      operationId: 'operation-id',
+      action: 'conflicts',
+    });
+    expect(post).toHaveBeenCalledWith({
+      type: 'preparationAction',
+      rootUri: 'file:///study-a',
+      operationId: 'operation-id',
+      action: 'cancel',
+    });
+  });
 });

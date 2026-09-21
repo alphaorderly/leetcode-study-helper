@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type {
+  PreparationAction,
   RepositorySubmissionSnapshot,
   SolutionGitStatus,
   SolutionSubmissionStatus,
@@ -11,6 +12,7 @@ import { SubmissionActions, type SubmissionSolution } from './submission/submiss
 import { summaryForStatuses } from './submission/submissionModel';
 import { SubmissionStatusReader } from './submission/submissionStatusReader';
 import { GitRepositoryAdapter, addChangeUris } from './vscodeGit';
+import { PreparationService, type PreparationScope } from './submission/preparationService';
 
 export type { SubmissionSolution } from './submission/submissionActions';
 
@@ -40,6 +42,7 @@ export class GitStatusService implements vscode.Disposable {
     this.repositoryAdapter,
     this.githubClient,
   );
+  private readonly preparation = new PreparationService(this.repositoryAdapter, this.githubClient);
   private readonly submissionStatusReader = new SubmissionStatusReader(this.githubClient);
   private readonly disposables: vscode.Disposable[] = [
     this.githubAuth,
@@ -60,9 +63,6 @@ export class GitStatusService implements vscode.Disposable {
     forceRemote = false,
   ): Promise<SolutionGitStatusResult> {
     const statuses = new Map(solutionUris.map((uri) => [uri, 'unknown' as SolutionGitStatus]));
-    if (solutionUris.length === 0) {
-      return { statuses };
-    }
 
     const repository = await this.repositoryAdapter.getRepository(repositoryRoot);
     if (!repository) {
@@ -94,10 +94,12 @@ export class GitStatusService implements vscode.Disposable {
       for (const uri of solutionUris) {
         statuses.set(uri, !upstream ? 'unknown' : changedUris.has(uri) ? 'unpushed' : 'pushed');
       }
-      const submissionResult =
-        submissionSolutions.length > 0
-          ? await this.submissionStatusReader.read(repository, submissionSolutions, forceRemote)
-          : undefined;
+      const submissionResult = await this.submissionStatusReader.read(
+        repository,
+        submissionSolutions,
+        forceRemote,
+      );
+      await this.enrichPreparation(repositoryRoot, submissionResult.snapshot, forceRemote);
       return {
         remoteName: upstream?.remote,
         statuses,
@@ -106,13 +108,10 @@ export class GitStatusService implements vscode.Disposable {
         submission: submissionResult?.snapshot,
       };
     } catch (error) {
-      if (submissionSolutions.length === 0) {
-        return { statuses };
-      }
       const submissionStatuses = new Map(
         submissionSolutions.map(({ uri }) => [uri, 'unknown' as SolutionSubmissionStatus]),
       );
-      return {
+      const result: SolutionGitStatusResult = {
         statuses,
         submissionStatuses,
         pullRequestNumbers: new Map(),
@@ -136,6 +135,65 @@ export class GitStatusService implements vscode.Disposable {
           blockingTrackedFiles: [],
         },
       };
+      if (result.submission)
+        await this.enrichPreparation(repositoryRoot, result.submission, forceRemote);
+      return result;
+    }
+  }
+
+  /** 준비 기록과 현재 브랜치의 PR을 독립적으로 읽어 원격 오류 중에도 복구를 제공합니다. */
+  private async enrichPreparation(
+    root: vscode.Uri,
+    snapshot: RepositorySubmissionSnapshot,
+    forceRemote = false,
+  ): Promise<void> {
+    try {
+      snapshot.preparation = await this.preparation.snapshot(root);
+    } catch (error) {
+      snapshot.returnToMainDisabledReason =
+        error instanceof Error ? error.message : '준비 기록을 확인할 수 없습니다.';
+    }
+    if (snapshot.preparation && !snapshot.preparation.completed) {
+      snapshot.canSync = false;
+      snapshot.blockedReason = '다음 주차 준비를 계속하거나 원본을 복원해 주세요.';
+    }
+    try {
+      const pr = await this.preparation.currentPullRequest(root, forceRemote);
+      snapshot.mergedCurrentBranch = Boolean(pr?.merged_at && pr.head?.sha);
+      if (snapshot.mergedCurrentBranch) {
+        snapshot.returnToMainDisabledReason = undefined;
+        snapshot.syncDisabledReason =
+          '제출이 완료되었습니다. 다음 주차 준비로 main 복귀와 동기화를 진행하세요.';
+      } else if (snapshot.branch?.startsWith('week-')) {
+        snapshot.returnToMainDisabledReason ??= '현재 주차 PR의 병합 완료를 먼저 확인해 주세요.';
+      }
+    } catch (error) {
+      snapshot.returnToMainDisabledReason =
+        error instanceof Error ? error.message : 'PR 상태를 확인할 수 없습니다.';
+    }
+  }
+
+  /** 확장 안에서 보존·main 복귀·다음 주차 준비를 수행합니다. */
+  async prepareNextWeek(
+    root: vscode.Uri,
+    solutions: readonly SubmissionSolution[],
+    scope?: PreparationScope,
+  ): Promise<void> {
+    try {
+      await this.preparation.prepare(root, solutions, scope);
+    } finally {
+      this.githubClient.clearSubmissionCache();
+      this.changeEmitter.fire();
+    }
+  }
+
+  /** 영속 준비 작업의 재개·취소·보관함 명령을 실행합니다. */
+  async preparationAction(root: vscode.Uri, id: string, action: PreparationAction): Promise<void> {
+    try {
+      await this.preparation.action(root, id, action);
+    } finally {
+      this.githubClient.clearSubmissionCache();
+      this.changeEmitter.fire();
     }
   }
 
@@ -146,12 +204,16 @@ export class GitStatusService implements vscode.Disposable {
     week: number | undefined,
     solutions: readonly SubmissionSolution[],
   ): Promise<void> {
-    return this.submissionActions.stageSolution(repositoryRoot, uri, week, solutions);
+    return this.preparation.mutation(repositoryRoot, () =>
+      this.submissionActions.stageSolution(repositoryRoot, uri, week, solutions),
+    );
   }
 
   /** 제출 작업기에 풀이 스테이징 해제를 위임합니다. */
   async unstageSolution(repositoryRoot: vscode.Uri, uri: vscode.Uri): Promise<void> {
-    return this.submissionActions.unstageSolution(repositoryRoot, uri);
+    return this.preparation.mutation(repositoryRoot, () =>
+      this.submissionActions.unstageSolution(repositoryRoot, uri),
+    );
   }
 
   /** 제출 작업기에 현재 주차 풀이의 검증과 커밋을 위임합니다. */
@@ -161,12 +223,16 @@ export class GitStatusService implements vscode.Disposable {
     expectedFiles: readonly SubmissionFileSnapshot[],
     solutions: readonly SubmissionSolution[],
   ): Promise<void> {
-    return this.submissionActions.commit(repositoryRoot, message, expectedFiles, solutions);
+    return this.preparation.mutation(repositoryRoot, () =>
+      this.submissionActions.commit(repositoryRoot, message, expectedFiles, solutions),
+    );
   }
 
   /** 제출 작업기에 주차 브랜치의 검증과 push를 위임합니다. */
   async push(repositoryRoot: vscode.Uri, solutions: readonly SubmissionSolution[]): Promise<void> {
-    return this.submissionActions.push(repositoryRoot, solutions);
+    return this.preparation.mutation(repositoryRoot, () =>
+      this.submissionActions.push(repositoryRoot, solutions),
+    );
   }
 
   /** 제출 작업기에 공식 main과 포크 동기화를 위임합니다. */
@@ -174,7 +240,9 @@ export class GitStatusService implements vscode.Disposable {
     repositoryRoot: vscode.Uri,
     solutions: readonly SubmissionSolution[] = [],
   ): Promise<void> {
-    return this.submissionActions.syncFork(repositoryRoot, solutions);
+    return this.preparation.mutation(repositoryRoot, () =>
+      this.submissionActions.syncFork(repositoryRoot, solutions),
+    );
   }
 
   /** 제출 작업기에 풀이 외 추적 파일 변경 되돌리기를 위임합니다. */
@@ -183,10 +251,12 @@ export class GitStatusService implements vscode.Disposable {
     solutions: readonly SubmissionSolution[],
     expectedRelativePaths: readonly string[],
   ): Promise<void> {
-    return this.submissionActions.discardOtherTrackedChanges(
-      repositoryRoot,
-      solutions,
-      expectedRelativePaths,
+    return this.preparation.mutation(repositoryRoot, () =>
+      this.submissionActions.discardOtherTrackedChanges(
+        repositoryRoot,
+        solutions,
+        expectedRelativePaths,
+      ),
     );
   }
 
@@ -195,7 +265,7 @@ export class GitStatusService implements vscode.Disposable {
     repositoryRoot: vscode.Uri,
     solutions: readonly SubmissionSolution[] = [],
   ): Promise<void> {
-    return this.submissionActions.returnToMainAndSync(repositoryRoot, solutions);
+    return this.prepareNextWeek(repositoryRoot, solutions);
   }
 
   /** 제출 작업기에 주차 PR 또는 생성 화면 열기를 위임합니다. */

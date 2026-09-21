@@ -54,6 +54,7 @@ export interface GitHubPullRequest {
   readonly state?: 'open' | 'closed';
   readonly merged_at?: string | null;
   readonly head?: {
+    readonly sha?: string;
     readonly ref?: string;
     readonly repo?: { readonly full_name?: string } | null;
     readonly user?: { readonly login?: string } | null;
@@ -111,9 +112,55 @@ interface CachedRemoteValue<T> {
  * 쓰기 기능은 없고, Git 작업 후 clearSubmissionCache 또는 인증 변경 후 clearCaches를 호출합니다.
  */
 export class GitHubSubmissionClient {
+  /** 현재 브랜치의 PR만 조회합니다. 다른 열린 주차 PR로 대체하지 않습니다. */
+  async getBranchPullRequest(
+    remote: ParsedGitHubRemote,
+    branch: string,
+    force = true,
+  ): Promise<GitHubPullRequest | undefined> {
+    const key = `${remote.owner}/${remote.repository}:${branch}`.toLowerCase();
+    const cached = this.branchPullRequestCache.get(key);
+    if (!force && cached && cached.expiresAt > Date.now()) return cached.value;
+    const pulls = await this.http.githubJson<GitHubPullRequest[]>(
+      `/repos/${CANONICAL_FULL_NAME}/pulls?state=all&base=main&head=${encodeURIComponent(`${remote.owner}:${branch}`)}&sort=updated&direction=desc&per_page=100`,
+    );
+    const matching = pulls.filter(
+      (pr) =>
+        pr.head?.ref === branch &&
+        pr.head.repo?.full_name?.toLowerCase() ===
+          `${remote.owner}/${remote.repository}`.toLowerCase(),
+    );
+    const candidate = matching.find((pr) => pr.state === 'open') ?? matching[0];
+    if (!candidate) {
+      this.branchPullRequestCache.set(key, {
+        expiresAt: Date.now() + REMOTE_CACHE_MS,
+        value: undefined,
+      });
+      return undefined;
+    }
+    const detail = await this.http.githubJson<GitHubPullRequest>(
+      `/repos/${CANONICAL_FULL_NAME}/pulls/${candidate.number}`,
+    );
+    if (
+      detail.head?.ref !== branch ||
+      detail.head.repo?.full_name?.toLowerCase() !==
+        `${remote.owner}/${remote.repository}`.toLowerCase()
+    ) {
+      throw new Error('현재 브랜치 PR의 저장소를 확인할 수 없습니다.');
+    }
+    this.branchPullRequestCache.set(key, {
+      expiresAt: Date.now() + REMOTE_CACHE_MS,
+      value: detail,
+    });
+    return detail;
+  }
   /** 요청마다 인증 정보를 읽는 전송 계층입니다. 이 클라이언트의 제출 판단·캐시와 분리되어 있습니다. */
   private readonly http: GitHubHttpClient;
   /** owner/repository 소문자 키의 완료된 포크 신원입니다. 조회 실패 시 이전 verified 값은 만료 후에도 fallback으로 사용합니다. */
+  private readonly branchPullRequestCache = new Map<
+    string,
+    CachedRemoteValue<GitHubPullRequest | undefined>
+  >();
   private readonly forkIdentityCache = new Map<string, CachedRemoteValue<ForkIdentitySnapshot>>();
   /** 요청한 브랜치별 완료 결과입니다. 열린 PR 때문에 실제 응답 브랜치가 달라져도 요청 키로 보관합니다. */
   private readonly remoteSubmissionCache = new Map<
@@ -282,6 +329,7 @@ export class GitHubSubmissionClient {
   /** 제출 작업 이후 브랜치 비교와 공식 파일 캐시를 무효화합니다. */
   clearSubmissionCache(): void {
     this.remoteSubmissionCache.clear();
+    this.branchPullRequestCache.clear();
     this.canonicalTreeCache = undefined;
   }
 

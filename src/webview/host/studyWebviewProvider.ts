@@ -31,6 +31,8 @@ const WEBVIEW_MESSAGE_TYPES: Record<WebviewToExtensionMessage['type'], true> = {
   syncFork: true,
   discardOtherTrackedChanges: true,
   returnToMainAndSync: true,
+  prepareNextWeek: true,
+  preparationAction: true,
   refreshSubmission: true,
   signInGitHub: true,
 };
@@ -173,6 +175,14 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
           break;
         case 'returnToMainAndSync':
           await this.withBusy(() => this.controller.returnToMainAndSync(message.rootUri));
+          break;
+        case 'prepareNextWeek':
+          await this.withBusy(() => this.controller.prepareNextWeek(message.rootUri));
+          break;
+        case 'preparationAction':
+          await this.withBusy(() =>
+            this.controller.preparationAction(message.rootUri, message.operationId, message.action),
+          );
           break;
         case 'refreshSubmission':
           await this.withBusy(() => this.controller.refreshSubmission());

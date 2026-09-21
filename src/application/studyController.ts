@@ -14,6 +14,7 @@ import {
 } from '../domain/solutions/otherSolutions';
 import { isIgnoredByLineLint, isValidNickname } from '../domain/solutions/solutions';
 import type {
+  PreparationAction,
   CurrentProblemSnapshot,
   ExtensionSnapshot,
   LineLintFixResult,
@@ -397,6 +398,16 @@ export class StudyController implements vscode.Disposable {
   /** 신뢰·저장소·복귀 가능 여부를 확인해 main 복귀·동기화 후 Git·원격 상태를 갱신합니다. */
   async returnToMainAndSync(rootUri: string): Promise<void> {
     return this.submissionCommands.returnToMainAndSync(rootUri);
+  }
+
+  /** 보존과 다음 주차 준비 UI를 실행합니다. */
+  async prepareNextWeek(rootUri: string): Promise<void> {
+    return this.submissionCommands.prepareNextWeek(rootUri);
+  }
+
+  /** 준비 작업을 재개하거나 보관함을 엽니다. */
+  async preparationAction(rootUri: string, id: string, action: PreparationAction): Promise<void> {
+    return this.submissionCommands.preparationAction(rootUri, id, action);
   }
 
   /** 로컬 Git 상태와 원격 제출 정보를 모두 강제로 다시 읽습니다. */

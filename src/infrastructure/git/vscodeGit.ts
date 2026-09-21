@@ -112,6 +112,7 @@ export interface GitRepository {
 
 /** Git 저장소 목록과 열림·닫힘·확장 상태 이벤트를 제공하는 API입니다. */
 interface GitApi {
+  readonly git?: { readonly path: string };
   readonly repositories: GitRepository[];
   readonly onDidChangeState: vscode.Event<unknown>;
   readonly onDidOpenRepository: vscode.Event<GitRepository>;
@@ -226,6 +227,12 @@ export function repositoryFingerprint(repository: GitRepository): string {
  * 내용이 같은 Git 이벤트는 걸러 갱신 루프를 줄이고, dispose에서 구독과 캐시를 해제합니다.
  */
 export class GitRepositoryAdapter implements vscode.Disposable {
+  /** VS Code가 실제 사용하는 Git 경로입니다. 임의의 실행 파일로 대체하지 않습니다. */
+  async executable(): Promise<string> {
+    const api = await this.getApi();
+    if (!api?.git?.path) throw new Error('VS Code Git 실행 파일을 확인할 수 없습니다.');
+    return api.git.path;
+  }
   /** 내용이 달라진 Git 이벤트만 상위 갱신 세션에 전달합니다. 모든 원시 Git 이벤트를 그대로 중계하지 않습니다. */
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   /** Git API의 전역 이벤트 구독입니다. 저장소별 구독은 루트별 해제를 위해 별도의 Map에서 관리합니다. */

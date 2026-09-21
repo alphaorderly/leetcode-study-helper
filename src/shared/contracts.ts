@@ -163,6 +163,9 @@ export interface BlockingTrackedFile {
  * 표시용으로 합친 pushed 커밋도 들어가므로 미푸시 여부는 각 항목의 pushed를 확인합니다.
  */
 export interface RepositorySubmissionSnapshot {
+  returnToMainDisabledReason?: string;
+  mergedCurrentBranch?: boolean;
+  preparation?: PreparationSnapshot;
   status: 'checking' | 'ready' | 'unsupported' | 'blocked' | 'unavailable';
   branch?: string;
   submissionBranch?: string;
@@ -347,6 +350,8 @@ export type WebviewToExtensionMessage =
   | { type: 'syncFork'; rootUri: string }
   | { type: 'discardOtherTrackedChanges'; rootUri: string }
   | { type: 'returnToMainAndSync'; rootUri: string }
+  | { type: 'prepareNextWeek'; rootUri: string }
+  | { type: 'preparationAction'; rootUri: string; operationId: string; action: PreparationAction }
   | { type: 'refreshSubmission' }
   | { type: 'signInGitHub' };
 
@@ -355,3 +360,19 @@ export type ExtensionToWebviewMessage =
   | { type: 'state'; state: ExtensionSnapshot }
   | { type: 'currentProblem'; currentProblem?: CurrentProblemSnapshot }
   | { type: 'busy'; value: boolean };
+
+/** 다음 주차 준비에서 사용자가 실행할 수 있는 복구 작업입니다. */
+export type PreparationAction =
+  'continue' | 'cancel' | 'shelf' | 'cleanup' | 'conflicts' | 'existingWeek';
+
+/** 저장소에 보존된 준비 작업의 표시 정보입니다. 내부 ref와 실행 인자는 노출하지 않습니다. */
+export interface PreparationSnapshot {
+  id: string;
+  phase: string;
+  sourceBranch: string;
+  targetWeek?: number;
+  error?: string;
+  completed: boolean;
+  files: string[];
+  conflicts: string[];
+}

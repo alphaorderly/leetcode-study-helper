@@ -113,6 +113,16 @@ suite('LeetCode Study Helper integration', () => {
     await configuration.update('preferredLanguage', undefined, vscode.ConfigurationTarget.Global);
   });
 
+  test('exposes the built-in Git executable used for durable preparation backups', async () => {
+    const extension = vscode.extensions.getExtension('vscode.git');
+    assert.ok(extension);
+    const exports = extension.isActive ? extension.exports : await extension.activate();
+    const api = exports.getAPI(1);
+    assert.equal(typeof api.git.path, 'string');
+    const { stdout } = await execFileAsync(api.git.path, ['--version']);
+    assert.match(stdout, /^git version /);
+  });
+
   test('detects both workspace roots and matches case-sensitively', async () => {
     const state = await waitForState(
       (current) =>

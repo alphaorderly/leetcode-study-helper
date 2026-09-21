@@ -439,3 +439,60 @@ describe('GitHubSubmissionClient authentication', () => {
     client.dispose();
   });
 });
+
+describe('current branch pull request verification', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const remote = parseConsistentRemote({
+    name: 'origin',
+    fetchUrl: 'https://github.com/CaseUser/leetcode-study.git',
+  })!;
+  const merged = {
+    number: 77,
+    state: 'closed',
+    merged_at: '2026-09-01',
+    head: { ref: 'week-01', sha: 'a'.repeat(40), repo: { full_name: 'CaseUser/leetcode-study' } },
+  };
+
+  it('uses the requested branch detail even with another open week PR', async () => {
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/pulls?state=all'))
+        return response([
+          { ...merged, number: 88, state: 'open', head: { ...merged.head, ref: 'week-02' } },
+          merged,
+        ]);
+      if (url.endsWith('/pulls/77')) return response(merged);
+      throw new Error(`Unexpected request ${url}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const client = new GitHubSubmissionClient();
+    expect(await client.getBranchPullRequest(remote, 'week-01', false)).toEqual(merged);
+    expect(await client.getBranchPullRequest(remote, 'week-01', false)).toEqual(merged);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await client.getBranchPullRequest(remote, 'week-01', true);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    client.dispose();
+  });
+
+  it('rejects a detail whose repository changed and propagates authentication failures', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) =>
+        String(input).includes('/pulls?')
+          ? response([merged])
+          : response({
+              ...merged,
+              head: { ...merged.head, repo: { full_name: 'Other/leetcode-study' } },
+            }),
+      ),
+    );
+    const client = new GitHubSubmissionClient();
+    await expect(client.getBranchPullRequest(remote, 'week-01')).rejects.toThrow('저장소');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => errorResponse(401)),
+    );
+    await expect(client.getBranchPullRequest(remote, 'week-01')).rejects.toThrow();
+    client.dispose();
+  });
+});

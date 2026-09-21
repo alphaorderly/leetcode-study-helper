@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { ExtensionSnapshot, RepositorySnapshot } from '../shared/contracts';
+import type { PreparationAction, ExtensionSnapshot, RepositorySnapshot } from '../shared/contracts';
 import type { GitStatusService } from '../infrastructure/git/gitStatusService';
 import { requireSolution } from './snapshotQueries';
 
@@ -15,6 +15,8 @@ type SubmissionGitService = Pick<
   | 'discardOtherTrackedChanges'
   | 'returnToMainAndSync'
   | 'signInGitHub'
+  | 'prepareNextWeek'
+  | 'preparationAction'
 >;
 
 /**
@@ -161,16 +163,37 @@ export class SubmissionCommands {
 
   /** 신뢰·저장소·복귀 가능 여부를 확인해 main 복귀·동기화 후 Git·원격 상태를 갱신합니다. */
   async returnToMainAndSync(rootUri: string): Promise<void> {
-    this.requireTrustedWorkspace('main으로 돌아가려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const repository = this.requireSubmissionRepository(rootUri, true);
-    if (!repository.submission?.canReturnToMain) {
-      throw new Error('병합 완료와 깨끗한 Git 상태를 확인한 뒤 main으로 돌아가 주세요.');
+    return this.prepareNextWeek(rootUri);
+  }
+
+  /** 작업 보존 UI를 열고 결과·실패 모두 문제 목록과 Git 상태를 갱신합니다. */
+  async prepareNextWeek(rootUri: string): Promise<void> {
+    this.requireTrustedWorkspace('다음 주차를 준비하려면 워크스페이스를 신뢰해 주세요.');
+    const repository = this.getSnapshot().repositories.find((item) => item.rootUri === rootUri);
+    if (!repository) throw new Error('현재 워크스페이스의 저장소가 아닙니다.');
+    try {
+      await this.gitStatusService.prepareNextWeek(
+        vscode.Uri.parse(rootUri),
+        this.submissionSolutions(repository),
+        { nickname: this.getSnapshot().nickname, problems: repository.problems },
+      );
+    } finally {
+      await this.refreshAll();
+      await this.refreshGitStatuses(true, true);
     }
-    await this.gitStatusService.returnToMainAndSync(
-      vscode.Uri.parse(rootUri),
-      this.submissionSolutions(repository),
-    );
-    await this.refreshGitStatuses(true, true);
+  }
+
+  /** 실패 중인 작업도 저장소 신원과 복구 ID를 검증한 뒤 재개합니다. */
+  async preparationAction(rootUri: string, id: string, action: PreparationAction): Promise<void> {
+    this.requireTrustedWorkspace('준비 작업을 복구하려면 워크스페이스를 신뢰해 주세요.');
+    if (!this.getSnapshot().repositories.some((repository) => repository.rootUri === rootUri))
+      throw new Error('현재 워크스페이스의 저장소가 아닙니다.');
+    try {
+      await this.gitStatusService.preparationAction(vscode.Uri.parse(rootUri), id, action);
+    } finally {
+      await this.refreshAll();
+      await this.refreshGitStatuses(true, true);
+    }
   }
 
   /** 로컬 Git 상태와 원격 제출 정보를 모두 강제로 다시 읽습니다. */

@@ -278,12 +278,19 @@ export function submissionHeaderActions(
     },
     returnToMain: isWeekBranch(submission?.branch)
       ? {
-          label: 'main으로 돌아가 동기화',
-          disabled: ui.busy || !submission?.canReturnToMain,
+          label: submission?.mergedCurrentBranch ? '다음 주차 준비' : 'main으로 돌아가 동기화',
+          disabled:
+            ui.busy ||
+            Boolean(submission?.preparation && !submission.preparation.completed) ||
+            !(submission?.mergedCurrentBranch || submission?.canReturnToMain),
           title: submission?.canReturnToMain
             ? undefined
-            : 'PR 병합과 깨끗한 주차 브랜치 상태를 먼저 확인해 주세요.',
-          message: { type: 'returnToMainAndSync', rootUri },
+            : (submission?.returnToMainDisabledReason ??
+              'PR 병합과 깨끗한 주차 브랜치 상태를 먼저 확인해 주세요.'),
+          message: {
+            type: submission?.mergedCurrentBranch ? 'prepareNextWeek' : 'returnToMainAndSync',
+            rootUri,
+          },
         }
       : undefined,
   };

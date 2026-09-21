@@ -4,7 +4,6 @@ import type {
   SubmissionFileSnapshot,
 } from '../../../shared/contracts';
 import {
-  pullRequestStatus,
   type GitHubSubmissionClient,
   type ParsedGitHubRemote,
   type RemoteSubmissionState,
@@ -520,45 +519,6 @@ export class SubmissionActions {
     } catch {
       throw new Error('GitHub PR 작성 화면을 열지 못했습니다.');
     }
-  }
-
-  /** 주차 PR 병합과 깨끗한 로컬·원격 상태를 확인하고 main으로 전환해 동기화합니다. */
-  async returnToMainAndSync(
-    repositoryRoot: vscode.Uri,
-    solutions: readonly SubmissionSolution[],
-  ): Promise<void> {
-    const repository = await this.guards.requireSubmissionMutation(repositoryRoot, true);
-    const branch = repository.state.HEAD?.name;
-    if (!branch || !weekFromBranch(branch)) {
-      throw new Error('main으로 돌아가기는 week-XX 제출 브랜치에서만 사용할 수 있습니다.');
-    }
-    if (
-      repository.state.indexChanges.length > 0 ||
-      repository.state.workingTreeChanges.length > 0 ||
-      repository.state.untrackedChanges.length > 0 ||
-      repository.state.mergeChanges.length > 0 ||
-      repository.state.rebaseCommit
-    ) {
-      throw new Error('main으로 돌아가기 전에 모든 변경과 진행 중인 작업을 정리해 주세요.');
-    }
-    await repository.fetch({ remote: 'origin', prune: true });
-    await repository.status();
-    const remoteBranch = await this.guards.getBranch(repository, `origin/${branch}`);
-    if (!remoteBranch) {
-      throw new Error(`origin/${branch}을 찾을 수 없습니다.`);
-    }
-    if ((await getRefRelation(repository, `origin/${branch}`)) !== 'equal') {
-      throw new Error(`${branch}의 로컬·원격 상태가 일치하지 않습니다.`);
-    }
-    const origin = this.guards.requireOrigin(repository);
-    const remote = await this.githubClient.getRemoteSubmission(origin, branch, true);
-    if (!remote.latestPullRequest || pullRequestStatus(remote.latestPullRequest) !== 'merged') {
-      throw new Error('병합 완료된 주차 PR만 main으로 돌아가 동기화할 수 있습니다.');
-    }
-    /** 이전 검증을 통과한 후 main으로 전환합니다. 이어지는 동기화가 실패해도 이전 주차 브랜치로 자동 복귀하지 않습니다. */
-    await repository.checkout('main');
-    await repository.status();
-    await this.syncFork(repositoryRoot, solutions);
   }
 }
 

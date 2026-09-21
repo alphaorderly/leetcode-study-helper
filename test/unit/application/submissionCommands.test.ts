@@ -13,6 +13,8 @@ vi.mock('vscode', () => ({
 }));
 
 const gitMocks = {
+  prepareNextWeek: vi.fn(async () => {}),
+  preparationAction: vi.fn(async () => {}),
   stageSolution: vi.fn(async () => {}),
   unstageSolution: vi.fn(async () => {}),
   commit: vi.fn(async () => {}),
@@ -240,12 +242,13 @@ describe('SubmissionCommands', () => {
 
     await commands.returnToMainAndSync('file:///study');
 
-    expect(gitMocks.returnToMainAndSync).toHaveBeenCalledWith(
+    expect(gitMocks.prepareNextWeek).toHaveBeenCalledWith(
       expect.objectContaining({ fsPath: '/study' }),
       expect.arrayContaining([
         expect.objectContaining({ slug: 'two-sum' }),
         expect.objectContaining({ slug: 'three-sum' }),
       ]),
+      expect.objectContaining({ nickname: 'CaseUser' }),
     );
   });
 
@@ -377,5 +380,24 @@ describe('SubmissionCommands dependency boundaries', () => {
     await expect(commands.syncFork('file:///study')).rejects.toThrow('scan failed');
     expect(gitMocks.syncFork).toHaveBeenCalledOnce();
     expect(refresh).not.toHaveBeenCalled();
+  });
+  it('refreshes both solutions and Git state when preparation fails', async () => {
+    const { commands, refresh, refreshAll } = await createCommands(
+      submission({ status: 'blocked' }),
+    );
+    gitMocks.prepareNextWeek.mockRejectedValueOnce(new Error('recoverable conflict'));
+    await expect(commands.prepareNextWeek('file:///study')).rejects.toThrow('recoverable conflict');
+    expect(refreshAll).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledWith(true, true);
+  });
+
+  it('allows recovery during remote failure but rejects a foreign workspace root', async () => {
+    const { commands } = await createCommands(submission({ status: 'unavailable' }));
+    await commands.preparationAction('file:///study', 'id', 'continue');
+    expect(gitMocks.preparationAction).toHaveBeenCalledOnce();
+    await expect(commands.preparationAction('file:///foreign', 'id', 'cancel')).rejects.toThrow(
+      '워크스페이스',
+    );
+    expect(gitMocks.preparationAction).toHaveBeenCalledOnce();
   });
 });
