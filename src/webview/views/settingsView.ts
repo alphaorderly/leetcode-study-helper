@@ -4,9 +4,27 @@ import type { ViewContext } from '../state/viewTypes';
 
 /**
  * 호스트 스냅샷으로 설정 폼을 초기화하고 제출 시 saveSettings 메시지를 보냅니다.
+ * 닉네임이 없으면 항상 펼치고, 설정된 뒤에는 현재 값을 요약한 접힌 패널로 보여 줍니다.
+ * 펼침 여부는 ui.settingsOpen에 보관해 상태 갱신으로 다시 그려도 유지하며 적용 후에는 접습니다.
  * 실제 설정 검증·저장·저장소 재탐색은 호스트가 담당하며, ui.busy는 입력·버튼의 진행 표시용입니다.
  */
 export function renderSettings({ state, ui, post }: ViewContext): HTMLElement {
+  const panel = element('details', 'settings-panel');
+  const language = state.languages.find(({ id }) => id === state.preferredLanguage);
+  panel.append(
+    element(
+      'summary',
+      'settings-summary',
+      state.nickname
+        ? `설정 · ${state.nickname} · ${language?.label ?? state.preferredLanguage}`
+        : '설정',
+    ),
+  );
+  panel.open = !state.nickname || Boolean(ui.settingsOpen);
+  panel.addEventListener('toggle', () => {
+    ui.settingsOpen = panel.open;
+  });
+
   const form = element('form', 'settings-card');
   form.setAttribute('aria-label', '풀이 설정');
 
@@ -47,11 +65,13 @@ export function renderSettings({ state, ui, post }: ViewContext): HTMLElement {
     if (!form.reportValidity()) {
       return;
     }
+    ui.settingsOpen = false;
     post({
       type: 'saveSettings',
       nickname: nicknameInput.value,
       preferredLanguage: languageSelect.value,
     });
   });
-  return form;
+  panel.append(form);
+  return panel;
 }

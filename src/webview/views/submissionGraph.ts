@@ -165,7 +165,7 @@ function renderEmptySubmission(
   }
   region.append(
     graphButton({
-      ...emptySyncAction(repository.rootUri, submission, ui),
+      ...emptySyncAction(submission, ui),
       className: 'primary-button',
       onClick: () => post({ type: 'syncFork', rootUri: repository.rootUri }),
     }),
@@ -254,7 +254,7 @@ function renderPullRequestNode(context: SubmissionRenderContext): HTMLElement {
   );
   pullRequest.body.append(
     graphButton({
-      ...pullRequestAction(repository.rootUri, submission, facts, ui),
+      ...pullRequestAction(submission, facts, ui),
       className: 'primary-button submission-action-button',
       onClick: () => post({ type: 'openPullRequest', rootUri: repository.rootUri }),
     }),
@@ -284,7 +284,7 @@ function renderOriginNode(context: SubmissionRenderContext): HTMLElement {
   if (facts.hasUnpushed) {
     origin.body.append(
       graphButton({
-        ...pushAction(repository.rootUri, facts, ui),
+        ...pushAction(facts, ui),
         className: 'primary-button submission-action-button',
         onClick: () => post({ type: 'pushActiveWeek', rootUri: repository.rootUri }),
       }),
@@ -347,7 +347,7 @@ function renderStagedNode(context: SubmissionRenderContext): HTMLElement | undef
   input.addEventListener('input', () => {
     messages[key] = input.value;
   });
-  const action = commitAction(repository.rootUri, facts, ui);
+  const action = commitAction(facts, ui);
   staged.body.append(
     input,
     graphButton({

@@ -331,7 +331,6 @@ export interface LineLintFixResult {
  */
 export type WebviewToExtensionMessage =
   | { type: 'ready' }
-  | { type: 'refresh' }
   | { type: 'saveSettings'; nickname: string; preferredLanguage: string }
   | { type: 'openSolution'; uri: string }
   | { type: 'openOtherSolution'; rootUri: string; slug: string }
@@ -340,7 +339,6 @@ export type WebviewToExtensionMessage =
   | { type: 'loadCurrentProblem' }
   | { type: 'runCurrentSolution'; candidateId: string }
   | { type: 'deleteSolution'; uri: string }
-  | { type: 'fixAllSolutions' }
   | { type: 'createSolution'; rootUri: string; slug: string }
   | { type: 'stageSolution'; uri: string }
   | { type: 'unstageSolution'; uri: string }

@@ -17,7 +17,6 @@ export interface SubmissionGraphFacts {
   remoteUnavailable: boolean;
   /** 표시할 차단 사유가 있는지입니다. 원격 조회 실패 상태에서도 로컬 이력 문제로 true일 수 있습니다. */
   blocked: boolean;
-  hasStaged: boolean;
   /** 스테이징(풀이 외 포함) 또는 미푸시 커밋이 있는지입니다. 조회 실패 중에도 남길 화면을 결정합니다. */
   hasLocalWork: boolean;
   /** 로컬·원격 커밋, 파일, PR 중 타임라인에 표시할 항목이 있는지입니다. 작업 버튼의 허용 여부와는 다릅니다. */
@@ -37,11 +36,15 @@ export type SubmissionGraphLayout =
   | { type: 'empty-idle' }
   | { type: 'timeline' };
 
-/** 그래프 버튼의 표시 문구와 비활성 이유, 전송 메시지입니다. */
+/** 그래프 버튼의 표시 문구와 비활성 이유입니다. 전송 메시지는 입력값이 필요한 경우가 있어 뷰가 만듭니다. */
 export interface GraphAction {
   label: string;
   disabled: boolean;
   title?: string;
+}
+
+/** 입력값 없이 고정 메시지를 보내는 제출 헤더 버튼입니다. */
+export interface HeaderAction extends GraphAction {
   message: WebviewToExtensionMessage;
 }
 
@@ -67,7 +70,6 @@ export function submissionGraphFacts(
     hasUnpushed,
     remoteUnavailable: submission.status === 'unavailable',
     blocked: Boolean(submission.blockedReason),
-    hasStaged,
     hasLocalWork: hasStaged || hasOtherStaged || hasUnpushed,
     hasTimeline:
       hasStaged ||
@@ -196,7 +198,6 @@ export function pullRequestStatusLabel(status: PullRequestSnapshot['status']): s
 
 /** PR 열기 또는 작성 화면 버튼의 활성 조건을 계산합니다. */
 export function pullRequestAction(
-  rootUri: string,
   submission: RepositorySubmissionSnapshot,
   facts: SubmissionGraphFacts,
   ui: UiState,
@@ -208,36 +209,28 @@ export function pullRequestAction(
       ? ui.busy
       : remoteWriteDisabled(ui, facts, facts.hasUnpushed || submission.forkFiles.length === 0),
     title: !existing && facts.hasUnpushed ? '로컬 커밋을 origin에 먼저 push해 주세요.' : undefined,
-    message: { type: 'openPullRequest', rootUri },
   };
 }
 
 /** origin push 버튼의 활성 조건을 계산합니다. */
-export function pushAction(rootUri: string, facts: SubmissionGraphFacts, ui: UiState): GraphAction {
+export function pushAction(facts: SubmissionGraphFacts, ui: UiState): GraphAction {
   return {
     label: 'origin에 push',
     disabled: remoteWriteDisabled(ui, facts),
     title: facts.remoteUnavailable ? 'GitHub 원격 상태를 확인한 뒤 push할 수 있습니다.' : undefined,
-    message: { type: 'pushActiveWeek', rootUri },
   };
 }
 
 /** 주차 커밋 버튼의 활성 조건을 계산합니다. */
-export function commitAction(
-  rootUri: string,
-  facts: SubmissionGraphFacts,
-  ui: UiState,
-): GraphAction {
+export function commitAction(facts: SubmissionGraphFacts, ui: UiState): GraphAction {
   return {
     label: '이 주차 커밋',
     disabled: remoteWriteDisabled(ui, facts),
-    message: { type: 'commitActiveWeek', rootUri, message: '' },
   };
 }
 
 /** 빈 제출 화면의 포크 맞추기 버튼 활성 조건을 계산합니다. */
 export function emptySyncAction(
-  rootUri: string,
   submission: RepositorySubmissionSnapshot,
   ui: UiState,
 ): GraphAction {
@@ -247,35 +240,41 @@ export function emptySyncAction(
     title: submission.canSync
       ? undefined
       : (submission.syncDisabledReason ?? DEFAULT_SYNC_DISABLED),
-    message: { type: 'syncFork', rootUri },
   };
 }
 
-/** 제출 헤더의 새로고침·동기화·main 복귀 버튼 상태를 계산합니다. */
+/**
+ * 제출 헤더의 새로고침·동기화·main 복귀 버튼 상태를 계산합니다.
+ * 본문이 포크 맞추기 안내(empty-sync)를 보여줄 때는 같은 syncFork 버튼이 본문에 있으므로 헤더 동기화를 생략합니다.
+ */
 export function submissionHeaderActions(
   repository: RepositorySnapshot,
   ui: UiState,
 ): {
-  refresh: GraphAction;
-  sync: GraphAction;
-  returnToMain?: GraphAction;
+  refresh: HeaderAction;
+  sync?: HeaderAction;
+  returnToMain?: HeaderAction;
 } {
   const submission = repository.submission;
   const rootUri = repository.rootUri;
+  const showsEmptySync = submissionGraphLayout(submission).type === 'empty-sync';
   return {
     refresh: {
       label: '새로고침',
       disabled: ui.busy,
+      title: 'GitHub의 PR·원격 브랜치 상태를 다시 확인합니다.',
       message: { type: 'refreshSubmission' },
     },
-    sync: {
-      label: '포크 동기화',
-      disabled: ui.busy || !submission?.canSync,
-      title: submission?.canSync
-        ? '공식 main 가져오기'
-        : (submission?.syncDisabledReason ?? DEFAULT_SYNC_DISABLED),
-      message: { type: 'syncFork', rootUri },
-    },
+    sync: showsEmptySync
+      ? undefined
+      : {
+          label: '포크 동기화',
+          disabled: ui.busy || !submission?.canSync,
+          title: submission?.canSync
+            ? '공식 main 가져오기'
+            : (submission?.syncDisabledReason ?? DEFAULT_SYNC_DISABLED),
+          message: { type: 'syncFork', rootUri },
+        },
     returnToMain: isWeekBranch(submission?.branch)
       ? {
           label: submission?.mergedCurrentBranch ? '다음 주차 준비' : 'main으로 돌아가 동기화',

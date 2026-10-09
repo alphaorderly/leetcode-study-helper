@@ -2,6 +2,7 @@ import type {
   ExtensionSnapshot,
   ProblemSnapshot,
   RepositorySnapshot,
+  SolutionFileSnapshot,
 } from '../../shared/contracts';
 
 /** 문제 목록에서 전체·완료·미완료 여부를 선택하는 필터입니다. */
@@ -67,8 +68,28 @@ export function preferredSolution(
 }
 
 /**
+ * 카드에 표시되는 상태와 같은 기준으로 아직 origin에 올라가지 않은 풀이인지 판별합니다.
+ * 제출 상태가 확인된 포크에서는 작성 중·커밋 준비·추가 수정·push 필요를 미푸시로 보고,
+ * 그 밖에는 현재 브랜치 upstream 기준의 gitStatus를 사용합니다.
+ */
+export function isUnpushed(solution: SolutionFileSnapshot): boolean {
+  switch (solution.submissionStatus) {
+    case 'working':
+    case 'staged':
+    case 'staged-outdated':
+    case 'push-needed':
+      return true;
+    case undefined:
+    case 'unknown':
+      return solution.gitStatus === 'unpushed';
+    default:
+      return false;
+  }
+}
+
+/**
  * 검색·완료·미푸시 조건을 교집합으로 적용하며 입력 목록을 변경하지 않습니다.
- * 미푸시 판단은 선호 언어의 대표 풀이를 사용하고 completed는 파일 존재 여부입니다.
+ * 미푸시 판단은 선호 언어의 대표 풀이에 isUnpushed를 적용하고 completed는 파일 존재 여부입니다.
  * 검색 대상은 slug·표시 제목·난이도·주차이며 카탈로그의 모든 메타데이터를 검색하지는 않습니다.
  */
 export function visibleProblems(
@@ -83,7 +104,7 @@ export function visibleProblems(
       (options.filter === 'completed' && problem.completed) ||
       (options.filter === 'incomplete' && !problem.completed);
     const solution = problem.completed ? preferredSolution(problem, state) : undefined;
-    const matchesPushStatus = !options.unpushedOnly || solution?.gitStatus === 'unpushed';
+    const matchesPushStatus = !options.unpushedOnly || (solution ? isUnpushed(solution) : false);
     if (!matchesFilter || !matchesPushStatus || !needle) {
       return matchesFilter && matchesPushStatus;
     }

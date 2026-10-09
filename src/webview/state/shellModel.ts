@@ -20,25 +20,6 @@ export function shellNotices(state: ExtensionSnapshot | undefined): string[] {
   return notices;
 }
 
-/** 줄 끝 보정 버튼의 비활성 여부와 안내 문구를 계산합니다. */
-export function lintActionModel(
-  state: ExtensionSnapshot,
-  ui: UiState,
-): { disabled: boolean; title?: string } {
-  const eligibleSolutionCount = state.repositories
-    .flatMap(({ problems }) => problems)
-    .flatMap(({ solutions }) => solutions)
-    .filter(({ name }) => !name.endsWith('.md')).length;
-  const disabled = ui.busy || !state.workspaceTrusted || eligibleSolutionCount === 0;
-  if (!state.workspaceTrusted) {
-    return { disabled, title: '파일을 수정하려면 워크스페이스를 신뢰해야 합니다.' };
-  }
-  if (eligibleSolutionCount === 0) {
-    return { disabled, title: '수정할 제출 파일이 없습니다.' };
-  }
-  return { disabled };
-}
-
 /** 현재 문제 탭의 비활성 여부와 안내 문구를 반환합니다. */
 export function currentProblemTabModel(currentProblem: CurrentProblemSnapshot | undefined): {
   disabled: boolean;

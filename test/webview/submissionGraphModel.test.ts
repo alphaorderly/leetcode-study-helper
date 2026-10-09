@@ -154,7 +154,7 @@ describe('submissionGraphFacts and actions', () => {
         },
       ],
     });
-    const action = pullRequestAction('file:///study', current, submissionGraphFacts(current), ui);
+    const action = pullRequestAction(current, submissionGraphFacts(current), ui);
     expect(action.disabled).toBe(true);
     expect(action.title).toBe('로컬 커밋을 origin에 먼저 push해 주세요.');
   });
@@ -171,15 +171,27 @@ describe('submissionGraphFacts and actions', () => {
       status: 'unavailable',
       blockedReason: 'blocked',
     });
+    expect(pullRequestAction(current, submissionGraphFacts(current), ui).disabled).toBe(false);
     expect(
-      pullRequestAction('file:///study', current, submissionGraphFacts(current), ui).disabled,
-    ).toBe(false);
-    expect(
-      pullRequestAction('file:///study', current, submissionGraphFacts(current), {
+      pullRequestAction(current, submissionGraphFacts(current), {
         ...ui,
         busy: true,
       }).disabled,
     ).toBe(true);
+  });
+
+  it('omits the header fork sync while the empty state offers the same sync button', () => {
+    const repository = {
+      name: 'study',
+      rootUri: 'file:///study',
+      problems: [],
+      submission: submission({ behindOfficialMain: true }),
+    };
+    expect(submissionGraphLayout(repository.submission).type).toBe('empty-sync');
+    expect(submissionHeaderActions(repository, ui).sync).toBeUndefined();
+    expect(
+      submissionHeaderActions({ ...repository, submission: submission() }, ui).sync?.message,
+    ).toEqual({ type: 'syncFork', rootUri: 'file:///study' });
   });
 
   it('shows return-to-main only on week branches', () => {

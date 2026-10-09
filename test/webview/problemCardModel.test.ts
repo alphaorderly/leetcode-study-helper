@@ -115,16 +115,23 @@ describe('problemCardModel', () => {
     expect(model.answer.disabled).toBe(true);
   });
 
-  it('prefers the configured language and exposes extra files in that order', () => {
+  it('prefers the configured language and lists only the other language files', () => {
     const model = problemCardModel(completed, repository(completed), context());
     expect(model.primary).toMatchObject({ kind: 'open', uri: 'file:///study/two-sum/CaseUser.py' });
-    expect(model.extraSolutions?.map(({ extension, preferred }) => [extension, preferred])).toEqual(
-      [
-        ['.py', true],
-        ['.ts', false],
-      ],
-    );
-    expect(model.stage?.staged).toBe(false);
+    expect(model.extraSolutions?.map(({ extension }) => extension)).toEqual(['.ts']);
+    expect(model.stage?.kind).toBe('add');
+  });
+
+  it('distinguishes add, remove, and re-add stage actions', () => {
+    const withStatus = (submissionStatus: 'working' | 'staged' | 'staged-outdated') => ({
+      ...completed,
+      solutions: completed.solutions.map((solution) => ({ ...solution, submissionStatus })),
+    });
+    const kinds = (['working', 'staged', 'staged-outdated'] as const).map((status) => {
+      const problem = withStatus(status);
+      return problemCardModel(problem, repository(problem), context()).stage?.kind;
+    });
+    expect(kinds).toEqual(['add', 'remove', 'restage']);
   });
 
   it('hides stage actions when the fork is not verified', () => {

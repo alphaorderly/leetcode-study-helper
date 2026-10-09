@@ -13,6 +13,7 @@ import {
 import { gitStatusLabel, gitStatusTitle } from './solutionStatus';
 import { canToggleStage, stageDisabledReason } from './stagePolicy';
 import type { ViewContext } from './viewTypes';
+import type { StageIconKind } from '../components/icons';
 
 /** 카드 본문 클릭이 열기·생성·없음 중 어떤 동작인지 나타냅니다. */
 export type PrimaryCardAction =
@@ -36,22 +37,20 @@ export interface IconAction {
   message: WebviewToExtensionMessage;
 }
 
-/** 커밋 추가·해제 버튼의 표시와 전송 대상 URI입니다. */
+/** 커밋 추가·해제·재추가 버튼의 동작 종류, 표시와 전송 대상 URI입니다. */
 export interface StageAction {
-  staged: boolean;
-  needsRestage: boolean;
+  kind: StageIconKind;
   disabled: boolean;
   ariaLabel: string;
   tooltip: string;
   uri: string;
 }
 
-/** 여러 언어 풀이 중 하나에 대한 열기·스테이징 표시입니다. */
+/** 대표 풀이를 제외한 다른 언어 풀이 하나의 열기·스테이징 표시입니다. */
 export interface ExtraSolutionFile {
   extension: string;
   name: string;
   uri: string;
-  preferred: boolean;
   disabled: boolean;
   stage?: StageAction;
 }
@@ -93,7 +92,7 @@ export function solutionExtension(fileName: string): string {
 
 /**
  * 문제 카드의 표시와 사용자 명령을 순수하게 계산합니다. DOM 생성이나 실제 파일·Git 작업은 하지 않습니다.
- * 대표 풀이는 선호 언어를 우선하고, stage·delete·추가 풀이 목록은 해당 조건이 없으면 생략합니다.
+ * 대표 풀이는 선호 언어를 우선하고, stage·delete·다른 언어 풀이 목록은 해당 조건이 없으면 생략합니다.
  * 여기서 버튼이 활성화되어도 호스트가 명령 실행 시 현재 상태를 다시 검증합니다.
  */
 export function problemCardModel(
@@ -206,6 +205,12 @@ function primaryAction(
   return { kind: 'none', disabled: true };
 }
 
+const STAGE_ACTION_LABELS: Record<StageIconKind, string> = {
+  add: '커밋에 추가',
+  remove: '커밋에서 빼기',
+  restage: '최신 수정 다시 추가',
+};
+
 /** 스테이징 가능한 풀이만 추가·해제 버튼 모델로 만듭니다. */
 export function stageAction(
   solution: SolutionFileSnapshot,
@@ -218,14 +223,16 @@ export function stageAction(
   if (!canToggleStage(solution.submissionStatus)) {
     return undefined;
   }
-  const staged =
-    solution.submissionStatus === 'staged' || solution.submissionStatus === 'staged-outdated';
-  const needsRestage = solution.submissionStatus === 'staged-outdated';
-  const action = needsRestage ? '최신 수정 다시 추가' : staged ? '커밋에서 빼기' : '커밋에 추가';
+  const kind: StageIconKind =
+    solution.submissionStatus === 'staged-outdated'
+      ? 'restage'
+      : solution.submissionStatus === 'staged'
+        ? 'remove'
+        : 'add';
+  const action = STAGE_ACTION_LABELS[kind];
   const disabledReason = stageDisabledReason(repository, week, state, solution);
   return {
-    staged,
-    needsRestage,
+    kind,
     disabled: busy || Boolean(disabledReason),
     ariaLabel: `${problemTitle} ${solution.name} ${action}`,
     tooltip: disabledReason ?? action,
@@ -233,7 +240,10 @@ export function stageAction(
   };
 }
 
-/** 코드 풀이가 두 개 이상일 때만 선호 언어 우선의 파일 목록을 만듭니다. */
+/**
+ * 코드 풀이가 두 개 이상일 때 대표 풀이를 뺀 나머지를 이름순으로 반환합니다.
+ * 대표 풀이의 열기·스테이징은 카드 본문과 카드 우측 버튼이 이미 담당하므로 중복 표시하지 않습니다.
+ */
 function extraSolutionFiles(
   problem: ProblemSnapshot,
   preferred: SolutionFileSnapshot | undefined,
@@ -243,25 +253,16 @@ function extraSolutionFiles(
   showStage: boolean,
   title: string,
 ): ExtraSolutionFile[] | undefined {
-  const codeSolutions = problem.solutions
-    .filter(({ name }) => !name.endsWith('.md'))
-    .sort((left, right) => {
-      if (left.uri === preferred?.uri) {
-        return -1;
-      }
-      if (right.uri === preferred?.uri) {
-        return 1;
-      }
-      return left.name.localeCompare(right.name);
-    });
-  if (codeSolutions.length < 2) {
+  const others = problem.solutions
+    .filter(({ name, uri }) => !name.endsWith('.md') && uri !== preferred?.uri)
+    .sort((left, right) => left.name.localeCompare(right.name));
+  if (others.length === 0) {
     return undefined;
   }
-  return codeSolutions.map((codeSolution) => ({
+  return others.map((codeSolution) => ({
     extension: solutionExtension(codeSolution.name),
     name: codeSolution.name,
     uri: codeSolution.uri,
-    preferred: codeSolution.uri === preferred?.uri,
     disabled: busy,
     stage: showStage
       ? stageAction(codeSolution, title, repository, problem.week, state, busy)

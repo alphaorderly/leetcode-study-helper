@@ -5,13 +5,7 @@ import type { PostMessage, UiState, ViewContext } from './state/viewTypes';
 import { CurrentProblemViewRenderer } from './views/currentProblemView';
 import { renderProblemList } from './views/problemListView';
 import { renderSettings } from './views/settingsView';
-import {
-  renderControls,
-  renderIssues,
-  renderLintAction,
-  renderNotices,
-  renderViewTabs,
-} from './views/shellView';
+import { renderControls, renderIssues, renderNotices, renderViewTabs } from './views/shellView';
 import { renderSubmissionView } from './views/submissionView';
 
 export type { GroupingMode, StatusFilter } from './state/problemViewModel';
@@ -26,7 +20,6 @@ export type { PostMessage, UiState, ViewMode } from './state/viewTypes';
 export class WebviewRenderer {
   private readonly settingsRegion = element('div', 'app-region app-settings-region');
   private readonly noticesRegion = element('div', 'app-region app-notices-region');
-  private readonly lintRegion = element('div', 'app-region app-lint-region');
   private readonly controlsRegion = element('div', 'app-region app-controls-region');
   private readonly tabsRegion = element('div', 'app-region app-tabs-region');
   private readonly contentRegion = element('div', 'app-region app-content-region');
@@ -44,7 +37,6 @@ export class WebviewRenderer {
     this.root.replaceChildren(
       this.settingsRegion,
       this.noticesRegion,
-      this.lintRegion,
       this.controlsRegion,
       this.tabsRegion,
       this.contentRegion,
@@ -68,7 +60,7 @@ export class WebviewRenderer {
     }
     this.renderSettings();
     this.renderNotices();
-    this.renderLint();
+    this.renderControlsVisibility();
     this.renderTabs();
     this.renderContent();
     this.renderIssues();
@@ -102,7 +94,6 @@ export class WebviewRenderer {
     }
     this.ui.busy = busy;
     this.renderSettings();
-    this.renderLint();
     this.renderTabs();
     this.renderContent();
     this.updateBusyAttribute();
@@ -119,12 +110,9 @@ export class WebviewRenderer {
     this.noticesRegion.replaceChildren(...renderNotices(this.state));
   }
 
-  /** 저장소 존재 여부에 따라 줄 끝 보정 버튼과 목록 컨트롤 노출을 갱신합니다. */
-  private renderLint(): void {
-    const context = this.context();
-    const repos = hasRepositories(this.state);
-    this.lintRegion.replaceChildren(...(context && repos ? [renderLintAction(context)] : []));
-    this.controlsRegion.hidden = !repos;
+  /** 저장소가 없으면 목록 검색·필터 컨트롤을 숨깁니다. */
+  private renderControlsVisibility(): void {
+    this.controlsRegion.hidden = !hasRepositories(this.state);
   }
 
   /** 현재 문제와 저장소 상태에 맞춰 탭 영역과 선택 동작을 갱신합니다. */
@@ -151,7 +139,6 @@ export class WebviewRenderer {
     }
     const hideListChrome = listChromeHidden(this.ui);
     this.controlsRegion.hidden = hideListChrome;
-    this.lintRegion.hidden = hideListChrome;
     if (hideListChrome) {
       this.contentRegion.replaceChildren(
         renderSubmissionView(context, () => {
@@ -162,7 +149,6 @@ export class WebviewRenderer {
       return;
     }
     this.controlsRegion.hidden = false;
-    this.lintRegion.hidden = false;
     if (this.ui.viewMode === 'currentProblem' && context.state.currentProblem) {
       this.renderCurrentProblem(context.state.currentProblem);
       return;

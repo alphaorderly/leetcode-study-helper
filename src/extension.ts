@@ -20,6 +20,9 @@ export function activate(context: vscode.ExtensionContext): void {
       webviewOptions: { retainContextWhenHidden: true },
     }),
     vscode.commands.registerCommand('leetcodeStudyHelper.refresh', () => controller.refresh()),
+    vscode.commands.registerCommand('leetcodeStudyHelper.fixAllSolutions', () =>
+      provider.fixAllSolutions(),
+    ),
     vscode.commands.registerCommand('leetcodeStudyHelper.openView', async () => {
       await vscode.commands.executeCommand('workbench.view.extension.leetcodeStudyHelper');
       await vscode.commands.executeCommand(`${VIEW_ID}.focus`);

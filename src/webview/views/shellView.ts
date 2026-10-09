@@ -1,7 +1,7 @@
 import type { CurrentProblemSnapshot } from '../../shared/contracts';
-import { actionButton, toggleGroup } from '../components/controls';
+import { toggleGroup } from '../components/controls';
 import { element } from '../components/dom';
-import { currentProblemTabModel, lintActionModel, shellNotices } from '../state/shellModel';
+import { currentProblemTabModel, shellNotices } from '../state/shellModel';
 import type { GroupingMode, StatusFilter } from '../state/problemViewModel';
 import type { ViewContext, ViewMode } from '../state/viewTypes';
 
@@ -15,22 +15,6 @@ export function renderIssues(state: ViewContext['state'] | undefined): HTMLEleme
   return (
     state?.issues.map((issue) => element('p', 'issue', `${issue.rootName}: ${issue.message}`)) ?? []
   );
-}
-
-/** 전체 풀이의 줄 끝 보정 명령 버튼을 만들고 신뢰·작업 상태를 반영합니다. */
-export function renderLintAction({ state, ui, post }: ViewContext): HTMLElement {
-  const model = lintActionModel(state, ui);
-  const action = element('section', 'lint-action');
-  action.append(
-    actionButton({
-      className: 'primary-button lint-button',
-      label: '파일 맨 끝에 빈줄 추가하기',
-      disabled: model.disabled,
-      title: model.title,
-      onClick: () => post({ type: 'fixAllSolutions' }),
-    }),
-  );
-  return action;
 }
 
 /** 검색·상태 필터·그룹 선택을 UI 상태에 연결하고 변경 시 목록 갱신을 요청합니다. */

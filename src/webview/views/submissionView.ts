@@ -8,7 +8,7 @@ import {
 import type { ViewContext } from '../state/viewTypes';
 import { renderSubmissionGraph } from './submissionGraph';
 
-/** 저장소의 제출 단계별 풀이 수를 화면 요약 항목으로 만듭니다. */
+/** 저장소의 제출 단계별 풀이 수 중 0이 아닌 단계만 화면 요약 항목으로 만듭니다. */
 function renderSubmissionSummary(repository: RepositorySnapshot): HTMLElement {
   const summary = repository.submission?.summary;
   const region = element('div', 'submission-summary');
@@ -22,6 +22,9 @@ function renderSubmissionSummary(repository: RepositorySnapshot): HTMLElement {
     ['PR 진행', summary.prPending, 'pr-pending'],
     ['병합 완료', summary.merged, 'merged'],
   ] as const) {
+    if (count === 0) {
+      continue;
+    }
     const item = element('span', `submission-summary-item ${className}`);
     item.append(
       element('span', 'submission-summary-count', String(count)),
@@ -32,7 +35,7 @@ function renderSubmissionSummary(repository: RepositorySnapshot): HTMLElement {
   return region;
 }
 
-/** 제출 새로고침·포크 동기화·main 복귀 버튼에 현재 허용 상태와 명령을 연결합니다. */
+/** 제출 새로고침·포크 동기화·main 복귀 버튼 중 표시할 것만 현재 허용 상태와 명령을 연결합니다. */
 function renderSubmissionActions(
   repository: RepositorySnapshot,
   { ui, post }: ViewContext,
@@ -40,32 +43,18 @@ function renderSubmissionActions(
   const actions = element('div', 'submission-view-actions');
   const model = submissionHeaderActions(repository, ui);
   const className = 'secondary-button submission-header-button';
-  actions.append(
-    actionButton({
-      className,
-      label: model.refresh.label,
-      disabled: model.refresh.disabled,
-      onClick: () => post(model.refresh.message),
-    }),
-    actionButton({
-      className,
-      label: model.sync.label,
-      disabled: model.sync.disabled,
-      title: model.sync.title,
-      onClick: () => post(model.sync.message),
-    }),
-  );
-  const returnToMain = model.returnToMain;
-  if (returnToMain) {
-    actions.append(
-      actionButton({
-        className,
-        label: returnToMain.label,
-        disabled: returnToMain.disabled,
-        title: returnToMain.title,
-        onClick: () => post(returnToMain.message),
-      }),
-    );
+  for (const action of [model.refresh, model.sync, model.returnToMain]) {
+    if (action) {
+      actions.append(
+        actionButton({
+          className,
+          label: action.label,
+          disabled: action.disabled,
+          title: action.title,
+          onClick: () => post(action.message),
+        }),
+      );
+    }
   }
   return actions;
 }

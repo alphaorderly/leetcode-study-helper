@@ -67,19 +67,22 @@ export function bookOpenIcon(): SVGSVGElement {
   return icon;
 }
 
-/** 스테이징 여부에 맞는 Git 작업 버튼용 SVG 아이콘을 생성합니다. */
-export function gitStageIcon(active: boolean): SVGSVGElement {
-  const icon = svgIcon('git-stage-icon');
-  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  circle.setAttribute('cx', '12');
-  circle.setAttribute('cy', '12');
-  circle.setAttribute('r', '3');
+/** 커밋 추가·해제·재추가 버튼이 보여줄 동작 종류입니다. */
+export type StageIconKind = 'add' | 'remove' | 'restage';
+
+const STAGE_ICON_PATHS: Record<StageIconKind, string> = {
+  add: 'M12 5v14M5 12h14',
+  remove: 'M5 12h14',
+  restage: 'M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5',
+};
+
+/** VS Code 소스 제어의 +/− 관례를 따라 커밋 추가·해제·재추가 동작별 SVG 아이콘을 생성합니다. */
+export function stageIcon(kind: StageIconKind): SVGSVGElement {
+  const icon = svgIcon('stage-icon');
+  icon.classList.add(`stage-icon-${kind}`);
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute(
-    'd',
-    active ? 'M12 2v7M12 15v7M2 12h7M15 12h7' : 'M12 2v7M12 15v7M5 12h4M15 12h4M19 9v6M16 12h6',
-  );
-  icon.append(circle, path);
+  path.setAttribute('d', STAGE_ICON_PATHS[kind]);
+  icon.append(path);
   return icon;
 }
 

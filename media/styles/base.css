@@ -134,6 +134,19 @@ select {
   background: var(--ui-surface);
 }
 
+.settings-summary {
+  padding: 4px 0;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-panel[open] > .settings-summary {
+  margin-bottom: 6px;
+}
+
 .settings-card {
   display: grid;
   gap: 7px;
@@ -205,17 +218,6 @@ button:focus-visible {
 .problem-page-button:hover:not(:disabled) {
   border-color: var(--ui-border-strong);
   background: var(--ui-surface-hover);
-}
-
-.lint-button {
-  width: 100%;
-  color: #fff;
-  background: #a94442;
-  border-color: #8f3735;
-}
-
-.lint-button:hover:not(:disabled) {
-  background: #b94d4a;
 }
 
 button:disabled {

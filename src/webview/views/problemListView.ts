@@ -4,7 +4,7 @@ import { element } from '../components/dom';
 import {
   bookOpenIcon,
   externalLinkIcon,
-  gitStageIcon,
+  stageIcon,
   trashIcon,
   usersRoundIcon,
 } from '../components/icons';
@@ -17,25 +17,28 @@ import {
 import { groupProblems, visibleProblems } from '../state/problemViewModel';
 import type { ViewContext } from '../state/viewTypes';
 
-/** 스테이징 가능한 풀이에만 추가·해제 버튼을 만들고 작업 중·차단 상태를 반영합니다. */
+/**
+ * 스테이징 가능한 풀이에만 추가(+)·해제(−)·재추가(↻) 버튼을 만들고 작업 중·차단 상태를 반영합니다.
+ * stage-{kind} 클래스가 동작별 색을 정하며, 해제만 unstage이고 추가·재추가는 stage 명령입니다.
+ */
 function createStageButton(stage: StageAction, post: ViewContext['post']): HTMLButtonElement {
   const button = actionButton({
-    className: `stage-button${stage.staged ? ' active' : ''}`,
+    className: `stage-button stage-${stage.kind}`,
     disabled: stage.disabled,
     ariaLabel: stage.ariaLabel,
     tooltip: stage.tooltip,
     stopPropagation: true,
     onClick: () =>
       post({
-        type: stage.staged && !stage.needsRestage ? 'unstageSolution' : 'stageSolution',
+        type: stage.kind === 'remove' ? 'unstageSolution' : 'stageSolution',
         uri: stage.uri,
       }),
   });
-  button.append(gitStageIcon(stage.staged));
+  button.append(stageIcon(stage.kind));
   return button;
 }
 
-/** 코드 풀이가 여러 개일 때만 선호 언어 우선의 파일 선택 영역을 만듭니다. */
+/** 대표 풀이 외에 다른 언어 풀이가 있을 때만 파일 선택 영역을 만듭니다. */
 function renderSolutionSection(
   model: ProblemCardModel,
   post: ViewContext['post'],
@@ -54,11 +57,10 @@ function renderSolutionSection(
   buttons.setAttribute('aria-label', `${model.title} 풀이 파일`);
   for (const file of extraSolutions) {
     const button = actionButton({
-      className: `solution-button${file.preferred ? ' preferred' : ''}`,
+      className: 'solution-button',
       label: file.extension,
       title: `${file.name} 열기`,
       ariaLabel: `${file.name} 풀이 파일 열기`,
-      ariaCurrent: file.preferred ? 'true' : undefined,
       disabled: file.disabled,
       stopPropagation: true,
       onClick: () => post({ type: 'openSolution', uri: file.uri }),
@@ -133,7 +135,17 @@ function renderProblem(
 
   const actions = element('div', 'solution-actions');
   const actionButtons = element('div', 'solution-action-buttons');
-  actionButtons.append(iconActionButton(model.otherSolutions, usersRoundIcon(), post));
+  if (model.stage) {
+    actionButtons.append(createStageButton(model.stage, post));
+  }
+  actionButtons.append(
+    iconActionButton(model.otherSolutions, usersRoundIcon(), post),
+    iconActionButton(model.answer, bookOpenIcon(), post),
+    iconActionButton(model.openPage, externalLinkIcon(), post),
+  );
+  if (model.delete) {
+    actionButtons.append(iconActionButton(model.delete, trashIcon(), post));
+  }
   if (model.status.kind === 'has-file') {
     const status = element('span', 'solution-status has-file');
     status.title = model.status.title;
@@ -143,12 +155,6 @@ function renderProblem(
       model.status.gitLabel,
     );
     status.append(element('span', 'file-icon'), gitStatus);
-    if (model.delete) {
-      actionButtons.append(iconActionButton(model.delete, trashIcon(), post));
-    }
-    if (model.stage) {
-      actionButtons.append(createStageButton(model.stage, post));
-    }
     actions.append(status);
   } else {
     const status = element('span', 'solution-status no-file');
@@ -160,10 +166,6 @@ function renderProblem(
     status.append(statusCopy);
     actions.append(status);
   }
-  actionButtons.append(
-    iconActionButton(model.answer, bookOpenIcon(), post),
-    iconActionButton(model.openPage, externalLinkIcon(), post),
-  );
   actions.append(actionButtons);
   card.prepend(cardAction);
   card.append(actions);

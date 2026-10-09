@@ -491,6 +491,9 @@ suite('LeetCode Study Helper integration', () => {
   });
 
   test('fixes all matching submissions while ignoring markdown', async () => {
+    const commands = await vscode.commands.getCommands(true);
+    assert.ok(commands.includes('leetcodeStudyHelper.fixAllSolutions'));
+
     const state = await vscode.commands.executeCommand<ExtensionSnapshot>(
       'leetcodeStudyHelper.__getState',
     );

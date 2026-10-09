@@ -28,9 +28,11 @@ describe('webview listSettings', () => {
     renderApp(root, snapshot, ui, vi.fn());
 
     expect(replaceChildren).toHaveBeenCalledTimes(1);
-    expect(replaceChildren.mock.calls[0]).toHaveLength(7);
+    expect(replaceChildren.mock.calls[0]).toHaveLength(6);
     expect(replaceChildren.mock.calls[0]?.[0]).toBeInstanceOf(HTMLElement);
     expect((root.querySelector('#nickname') as HTMLInputElement).value).toBe('CaseUser');
+    expect((root.querySelector('.settings-panel') as HTMLDetailsElement).open).toBe(false);
+    expect(root.querySelector('.settings-summary')?.textContent).toBe('설정 · CaseUser · Python 3');
     expect(root.textContent).toContain('1주차');
     expect(root.textContent).toContain('2주차');
     expect(root.textContent).toContain('Two Sum');
@@ -45,11 +47,8 @@ describe('webview listSettings', () => {
     expect(root.textContent).toContain('origin');
     expect(root.textContent).not.toContain('CaseUser.ts');
     const solutionButtons = [...root.querySelectorAll<HTMLButtonElement>('.solution-button')];
-    expect(solutionButtons.map(({ textContent }) => textContent)).toEqual(['.py', '.ts']);
-    expect(solutionButtons[0]?.title).toBe('CaseUser.py 열기');
-    expect(solutionButtons[0]?.getAttribute('aria-current')).toBe('true');
-    expect(solutionButtons[1]?.title).toBe('CaseUser.ts 열기');
-    expect(solutionButtons[1]?.hasAttribute('aria-current')).toBe(false);
+    expect(solutionButtons.map(({ textContent }) => textContent)).toEqual(['.ts']);
+    expect(solutionButtons[0]?.title).toBe('CaseUser.ts 열기');
     expect(root.querySelector('.solution-file-label')?.textContent).toBe('다른 언어 풀이');
     expect(root.querySelector('.solution-file-buttons')?.getAttribute('role')).toBe('group');
     expect(root.querySelector('.solution-file-buttons')?.getAttribute('aria-label')).toBe(
@@ -112,11 +111,7 @@ describe('webview listSettings', () => {
     expect(root.querySelector('.stats')).toBeNull();
     expect(root.querySelector('.stat-card')).toBeNull();
     expect((root.querySelector('.unpushed-checkbox') as HTMLInputElement).checked).toBe(false);
-    expect((root.querySelector('.lint-button') as HTMLButtonElement).textContent).toBe(
-      '파일 맨 끝에 빈줄 추가하기',
-    );
-    expect(root.querySelector('.lint-action')).not.toBeNull();
-    expect(root.querySelector('.lint-card')).toBeNull();
+    expect(root.querySelector('.lint-button')).toBeNull();
     expect(root.querySelector('.repository-title')).toBeNull();
     expect(root.querySelector('.view-tabs')).not.toBeNull();
     expect(root.querySelector('.view-tab.active')?.textContent).toBe('리스트');
@@ -129,14 +124,13 @@ describe('webview listSettings', () => {
     expect(root.textContent).not.toContain('*.md는 제외됩니다.');
   });
 
-  it('orders solution buttons by the configured language and disables them while busy', () => {
+  it('excludes the configured language from other solutions and disables them while busy', () => {
     ui.busy = true;
     renderApp(root, { ...snapshot, preferredLanguage: 'typescript' }, ui, vi.fn());
 
     const solutionButtons = [...root.querySelectorAll<HTMLButtonElement>('.solution-button')];
-    expect(solutionButtons.map(({ textContent }) => textContent)).toEqual(['.ts', '.py']);
-    expect(solutionButtons[0]?.getAttribute('aria-current')).toBe('true');
-    expect(solutionButtons[0]?.getAttribute('aria-label')).toBe('CaseUser.ts 풀이 파일 열기');
+    expect(solutionButtons.map(({ textContent }) => textContent)).toEqual(['.py']);
+    expect(solutionButtons[0]?.getAttribute('aria-label')).toBe('CaseUser.py 풀이 파일 열기');
     expect(solutionButtons.every(({ disabled }) => disabled)).toBe(true);
   });
 
@@ -338,22 +332,37 @@ describe('webview listSettings', () => {
     ).toEqual(['Easy Problem', 'Medium Problem', 'Hard Problem']);
   });
 
-  it('posts settings, lint, open, delete, and create messages', () => {
+  it('opens settings without a nickname and keeps a user-opened panel across renders', () => {
+    renderApp(root, { ...snapshot, nickname: '' }, ui, vi.fn());
+    const panel = () => root.querySelector('.settings-panel') as HTMLDetailsElement;
+    expect(panel().open).toBe(true);
+    expect(root.querySelector('.settings-summary')?.textContent).toBe('설정');
+
+    renderApp(root, snapshot, ui, vi.fn());
+    expect(panel().open).toBe(false);
+    panel().open = true;
+    panel().dispatchEvent(new Event('toggle'));
+    renderApp(root, { ...snapshot }, ui, vi.fn());
+    expect(panel().open).toBe(true);
+
+    root.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true }));
+    renderApp(root, { ...snapshot }, ui, vi.fn());
+    expect(panel().open).toBe(false);
+  });
+
+  it('posts settings, open, delete, and create messages', () => {
     const post = vi.fn();
     renderApp(root, snapshot, ui, post);
 
     (root.querySelector('#preferred-language') as HTMLSelectElement).value = 'typescript';
     root.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true }));
-    (root.querySelector('.lint-button') as HTMLButtonElement).click();
     (
       root.querySelector('.problem-card.completed .problem-card-action') as HTMLButtonElement
     ).click();
     (
       root.querySelector('.problem-card.completed .other-solution-button') as HTMLButtonElement
     ).click();
-    const solutionButtons = root.querySelectorAll<HTMLButtonElement>('.solution-button');
-    solutionButtons[0]?.click();
-    solutionButtons[1]?.click();
+    root.querySelector<HTMLButtonElement>('.solution-button')?.click();
     (root.querySelector('.delete-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.completed .answer-button') as HTMLButtonElement).click();
     (root.querySelector('.problem-card.completed .open-page-button') as HTMLButtonElement).click();
@@ -369,9 +378,6 @@ describe('webview listSettings', () => {
       preferredLanguage: 'typescript',
     });
     expect(post).toHaveBeenCalledWith({
-      type: 'fixAllSolutions',
-    });
-    expect(post).toHaveBeenCalledWith({
       type: 'openSolution',
       uri: 'file:///study-a/two-sum/CaseUser.py',
     });
@@ -382,10 +388,6 @@ describe('webview listSettings', () => {
     });
     expect(post).toHaveBeenCalledWith({
       type: 'openSolution',
-      uri: 'file:///study-a/two-sum/CaseUser.py',
-    });
-    expect(post).toHaveBeenCalledWith({
-      type: 'openSolution',
       uri: 'file:///study-a/two-sum/CaseUser.ts',
     });
     expect(
@@ -393,11 +395,7 @@ describe('webview listSettings', () => {
         .map(([message]) => message)
         .filter((message) => message.type === 'openSolution')
         .map(({ uri }) => uri),
-    ).toEqual([
-      'file:///study-a/two-sum/CaseUser.py',
-      'file:///study-a/two-sum/CaseUser.py',
-      'file:///study-a/two-sum/CaseUser.ts',
-    ]);
+    ).toEqual(['file:///study-a/two-sum/CaseUser.py', 'file:///study-a/two-sum/CaseUser.ts']);
     expect(post).toHaveBeenCalledWith({
       type: 'deleteSolution',
       uri: 'file:///study-a/two-sum/CaseUser.py',
@@ -425,7 +423,7 @@ describe('webview listSettings', () => {
       rootUri: 'file:///study-a',
       slug: 'three-sum',
     });
-    expect(post).toHaveBeenCalledTimes(12);
+    expect(post).toHaveBeenCalledTimes(10);
   });
 
   it('filters by status and search text', () => {
@@ -458,7 +456,6 @@ describe('webview listSettings', () => {
     );
     expect(deleteButton.disabled).toBe(true);
     expect(deleteButton.dataset.tooltip).toContain('워크스페이스를 신뢰');
-    expect((root.querySelector('.lint-button') as HTMLButtonElement).disabled).toBe(true);
     expect(root.querySelector('.solution-create-hint')?.textContent).toBe(
       '워크스페이스 신뢰 후 생성',
     );

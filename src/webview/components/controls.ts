@@ -10,9 +10,6 @@ export interface ActionButtonOptions {
   title?: string;
   tooltip?: string;
   ariaLabel?: string;
-  ariaPressed?: boolean;
-  ariaSelected?: boolean;
-  ariaCurrent?: string;
   role?: string;
   stopPropagation?: boolean;
   onClick?: (event: MouseEvent) => void;
@@ -35,15 +32,6 @@ export function actionButton(options: ActionButtonOptions): HTMLButtonElement {
   }
   if (options.ariaLabel) {
     button.setAttribute('aria-label', options.ariaLabel);
-  }
-  if (options.ariaPressed !== undefined) {
-    button.setAttribute('aria-pressed', String(options.ariaPressed));
-  }
-  if (options.ariaSelected !== undefined) {
-    button.setAttribute('aria-selected', String(options.ariaSelected));
-  }
-  if (options.ariaCurrent) {
-    button.setAttribute('aria-current', options.ariaCurrent);
   }
   if (options.role) {
     button.setAttribute('role', options.role);
@@ -104,11 +92,6 @@ export function toggleGroup<T extends string>(options: {
     group.append(button);
   }
   return group;
-}
-
-/** 저장소 상대 경로에서 파일 이름만 남깁니다. */
-export function fileName(relativePath: string): string {
-  return relativePath.split('/').pop() ?? relativePath;
 }
 
 /** 제출 파일의 저장소 상대 경로를 목록 요소로 표시합니다. */

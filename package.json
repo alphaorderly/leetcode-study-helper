@@ -2,7 +2,7 @@
   "name": "leetcode-study-helper",
   "displayName": "리트코드 스터디 도우미",
   "description": "DaleStudy 리트코드 워크스페이스에서 풀이를 관리하고 주차별 PR로 제출합니다.",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "publisher": "alphaorderly",
   "license": "MIT",
   "icon": "media/extension-icon.png",
@@ -34,6 +34,7 @@
   "activationEvents": [
     "onView:leetcodeStudyHelper.explorer",
     "onCommand:leetcodeStudyHelper.refresh",
+    "onCommand:leetcodeStudyHelper.fixAllSolutions",
     "onCommand:leetcodeStudyHelper.openView"
   ],
   "capabilities": {
@@ -48,6 +49,12 @@
         "title": "새로 고침",
         "category": "리트코드 스터디 도우미",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "leetcodeStudyHelper.fixAllSolutions",
+        "title": "모든 풀이 파일 끝에 빈 줄 추가",
+        "category": "리트코드 스터디 도우미",
+        "enablement": "isWorkspaceTrusted"
       },
       {
         "command": "leetcodeStudyHelper.openView",
@@ -79,6 +86,11 @@
           "command": "leetcodeStudyHelper.refresh",
           "when": "view == leetcodeStudyHelper.explorer",
           "group": "navigation"
+        },
+        {
+          "command": "leetcodeStudyHelper.fixAllSolutions",
+          "when": "view == leetcodeStudyHelper.explorer",
+          "group": "maintenance@1"
         }
       ]
     },

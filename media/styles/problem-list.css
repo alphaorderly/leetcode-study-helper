@@ -206,12 +206,6 @@
   white-space: nowrap;
 }
 
-.solution-button.preferred {
-  color: var(--vscode-foreground);
-  background: var(--ui-surface-muted);
-  border-color: var(--ui-border-strong);
-}
-
 .solution-button:hover:not(:disabled) {
   color: var(--vscode-foreground);
   background: var(--ui-surface-hover);
@@ -222,7 +216,7 @@
 .users-round-icon,
 .book-open-icon,
 .external-link-icon,
-.git-stage-icon {
+.stage-icon {
   width: 14px;
   height: 14px;
   pointer-events: none;
@@ -376,11 +370,33 @@
 .other-solution-button:hover:not(:disabled),
 .answer-button:hover:not(:disabled),
 .open-page-button:hover:not(:disabled),
-.stage-button:hover:not(:disabled),
-.stage-button.active {
+.stage-button:hover:not(:disabled) {
   color: var(--vscode-foreground);
   background: var(--ui-surface-hover);
   border-color: var(--ui-border-strong);
+}
+
+/* 커밋 대상 상태는 카드 Git 상태 라벨과 같은 색을 써서 hover와 구분합니다. */
+.stage-button.stage-remove,
+.stage-button.stage-remove:hover:not(:disabled) {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #4f9d69);
+  border-color: currentColor;
+}
+
+.stage-button.stage-restage,
+.stage-button.stage-restage:hover:not(:disabled) {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #d0a03a);
+  border-color: currentColor;
+}
+
+/* 삭제는 되돌리기 어려운 동작이라 다른 버튼과 간격을 두고 hover 시 위험 색을 씁니다. */
+.delete-button {
+  margin-left: 6px;
+}
+
+.delete-button:hover:not(:disabled) {
+  color: var(--vscode-errorForeground, #f14c4c);
+  border-color: currentColor;
 }
 
 .file-icon {

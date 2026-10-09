@@ -28,7 +28,8 @@ describe('webview submission', () => {
 
     const stageButtons = root.querySelectorAll<HTMLButtonElement>('.stage-button');
     expect(stageButtons).toHaveLength(1);
-    const staged = [...stageButtons].find(({ classList }) => classList.contains('active'));
+    const staged = [...stageButtons].find(({ classList }) => classList.contains('stage-remove'));
+    expect(staged?.querySelector('.stage-icon-remove')).not.toBeNull();
     const workingState: ExtensionSnapshot = {
       ...state,
       repositories: state.repositories.map((repository) => ({
@@ -50,9 +51,12 @@ describe('webview submission', () => {
     });
 
     renderApp(root, workingState, ui, post);
-    const addButton = [...root.querySelectorAll<HTMLButtonElement>('.stage-button')].find(
+    const addButtons = [...root.querySelectorAll<HTMLButtonElement>('.stage-button')].filter(
       (button) => button.getAttribute('aria-label')?.includes('CaseUser.py 커밋에 추가'),
     );
+    expect(addButtons).toHaveLength(1);
+    const addButton = addButtons[0];
+    expect(addButton?.classList.contains('stage-add')).toBe(true);
     addButton?.click();
     expect(post).toHaveBeenCalledWith({
       type: 'stageSolution',
@@ -74,9 +78,12 @@ describe('webview submission', () => {
       })),
     };
     renderApp(root, outdatedState, ui, post);
-    root
-      .querySelector<HTMLButtonElement>('[aria-label*="CaseUser.ts 최신 수정 다시 추가"]')
-      ?.click();
+    const restage = root.querySelector<HTMLButtonElement>(
+      '[aria-label*="CaseUser.ts 최신 수정 다시 추가"]',
+    );
+    expect(restage?.classList.contains('stage-restage')).toBe(true);
+    expect(restage?.querySelector('.stage-icon-restage')).not.toBeNull();
+    restage?.click();
     expect(post).toHaveBeenCalledWith({
       type: 'stageSolution',
       uri: 'file:///study-a/two-sum/CaseUser.ts',
@@ -89,6 +96,9 @@ describe('webview submission', () => {
     renderApp(root, submissionSnapshot(), ui, post);
 
     expect(root.querySelector('.submission-view-title')?.textContent).toBe('주차별 제출');
+    expect(
+      [...root.querySelectorAll('.submission-summary-label')].map(({ textContent }) => textContent),
+    ).toEqual(['커밋 준비', 'PR 진행']);
     expect(
       [...root.querySelectorAll('.submission-node-title')].map(({ textContent }) => textContent),
     ).toEqual([

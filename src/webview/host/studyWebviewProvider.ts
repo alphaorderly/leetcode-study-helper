@@ -12,7 +12,6 @@ function nonce(): string {
 
 const WEBVIEW_MESSAGE_TYPES: Record<WebviewToExtensionMessage['type'], true> = {
   ready: true,
-  refresh: true,
   saveSettings: true,
   openSolution: true,
   openOtherSolution: true,
@@ -21,7 +20,6 @@ const WEBVIEW_MESSAGE_TYPES: Record<WebviewToExtensionMessage['type'], true> = {
   loadCurrentProblem: true,
   runCurrentSolution: true,
   deleteSolution: true,
-  fixAllSolutions: true,
   createSolution: true,
   stageSolution: true,
   unstageSolution: true,
@@ -88,6 +86,22 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
     });
   }
 
+  /**
+   * 보기 메뉴 명령으로 모든 풀이 파일 끝의 빈 줄을 보정하고 결과를 알립니다.
+   * 웹뷰 버튼과 같은 작업 중 표시를 사용하며 실패는 VS Code 오류 알림으로 표시합니다.
+   */
+  async fixAllSolutions(): Promise<void> {
+    try {
+      const result = await this.withBusy(() => this.controller.fixAllSolutions());
+      const passed = result.checked - result.fixed;
+      await vscode.window.showInformationMessage(
+        `라인린트 수정 완료: ${result.fixed}개 수정, ${passed}개 통과, ${result.ignored}개 제외`,
+      );
+    } catch (error) {
+      await vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   /** 컨트롤러의 화면 상태 변경 구독을 해제합니다. */
   dispose(): void {
     for (const subscription of this.changeSubscriptions) {
@@ -108,9 +122,6 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
           await this.post({ type: 'state', state: this.controller.currentSnapshot });
           break;
         }
-        case 'refresh':
-          await this.withBusy(() => this.controller.refresh());
-          break;
         case 'saveSettings':
           await this.withBusy(() =>
             this.controller.saveSettings(message.nickname, message.preferredLanguage),
@@ -139,14 +150,6 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
         case 'deleteSolution':
           await this.withBusy(() => this.controller.deleteSolution(message.uri));
           break;
-        case 'fixAllSolutions': {
-          const result = await this.withBusy(() => this.controller.fixAllSolutions());
-          const passed = result.checked - result.fixed;
-          await vscode.window.showInformationMessage(
-            `라인린트 수정 완료: ${result.fixed}개 수정, ${passed}개 통과, ${result.ignored}개 제외`,
-          );
-          break;
-        }
         case 'createSolution':
           await this.withBusy(() => this.controller.createSolution(message.rootUri, message.slug));
           break;
