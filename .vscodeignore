@@ -20,3 +20,4 @@ eslint.config.mjs
 esbuild.mjs
 .prettierrc.json
 .prettierignore
+media/readme/*.gif
