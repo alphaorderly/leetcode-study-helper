@@ -67,6 +67,7 @@ export function renderSettings({ state, ui, post }: ViewContext): HTMLElement {
       return;
     }
     ui.settingsOpen = false;
+    panel.open = false;
     post({
       type: 'saveSettings',
       nickname: nicknameInput.value,
@@ -77,62 +78,59 @@ export function renderSettings({ state, ui, post }: ViewContext): HTMLElement {
   return panel;
 }
 
-/** 사용 통계 상태를 동의 여부와 실제 수집 가능 여부로 구분해 설명합니다. */
-function telemetryStatus(state: TelemetrySettingsSnapshot | undefined): string {
-  if (!state?.enabled) {
-    return '사용 통계를 수집하지 않습니다.';
-  }
-  if (state.effectiveEnabled) {
-    return '사용 통계 수집을 허용했습니다. 설정에서 언제든 끌 수 있습니다.';
-  }
+/** 동의했지만 수집할 수 없는 이유만 짧은 툴팁·접근성 설명으로 제공합니다. */
+function telemetryUnavailableReason(state: TelemetrySettingsSnapshot): string {
+  if (!state.enabled || state.effectiveEnabled) return '';
   switch (state.disabledReason) {
     case 'vscode':
-      return 'VS Code 사용 통계 설정이 꺼져 있어 수집하지 않습니다.';
+      return 'VS Code 통계 설정이 꺼져 있습니다.';
     case 'development':
-      return '개발·테스트 실행에서는 사용 통계를 수집하지 않습니다.';
+      return '개발·테스트에서는 수집하지 않습니다.';
     case 'storage':
-      return '설치 식별자를 저장하지 못해 이번 실행에서는 수집하지 않습니다.';
+      return '설치 ID 저장 실패로 수집하지 않습니다.';
     default:
-      return '현재 실행에서는 사용 통계를 수집하지 않습니다.';
+      return '현재 수집하지 않습니다.';
   }
 }
 
 /** 닉네임 검증·적용 버튼과 독립적인 사용 통계 동의 영역을 만듭니다. */
 function renderTelemetrySettings({ state, post }: ViewContext): HTMLElement {
-  const section = element('section', 'settings-card telemetry-settings');
+  const section = element('section', 'telemetry-settings');
   section.setAttribute('aria-label', '사용 통계 설정');
   const label = element('label', 'telemetry-label');
   label.htmlFor = 'telemetry-enabled';
   const checkbox = element('input', 'telemetry-checkbox');
   checkbox.type = 'checkbox';
   checkbox.id = 'telemetry-enabled';
-  checkbox.checked = state.telemetry?.enabled ?? false;
-  checkbox.setAttribute('aria-describedby', 'telemetry-description telemetry-status');
   checkbox.addEventListener('change', () => {
     post({ type: 'setTelemetryEnabled', enabled: checkbox.checked });
   });
-  label.append(checkbox, element('span', undefined, '사용 통계 수집 허용'));
-  const description = element(
-    'p',
-    'telemetry-description',
-    '기능 개선을 위해 무작위 설치 식별자, 기능·문제·주차·언어와 실행 결과를 PostHog US에 보냅니다. 닉네임, 코드, 파일 경로와 저장소 주소는 보내지 않습니다.',
-  );
-  description.id = 'telemetry-description';
-  const status = element('p', 'telemetry-status', telemetryStatus(state.telemetry));
-  status.id = 'telemetry-status';
-  status.setAttribute('role', 'status');
-  section.append(label, description, status);
+  label.append(checkbox, element('span', undefined, '사용 통계'));
+  section.append(label);
+  updateTelemetrySettings(section, state.telemetry ?? { enabled: false, effectiveEnabled: false });
   return section;
 }
 
-/** 사용 통계 부분 응답으로 체크박스와 설명만 갱신해 작성 중인 폼과 화면을 보존합니다. */
+/** 체크박스와 짧은 수집 불가 설명만 갱신해 작성 중인 폼과 화면을 보존합니다. */
 export function updateTelemetrySettings(root: HTMLElement, state: TelemetrySettingsSnapshot): void {
   const checkbox = root.querySelector<HTMLInputElement>('#telemetry-enabled');
-  if (checkbox) {
-    checkbox.checked = state.enabled;
+  if (!checkbox) return;
+  checkbox.checked = state.enabled;
+  const reason = telemetryUnavailableReason(state);
+  checkbox.title = reason;
+  const label = checkbox.closest('label');
+  if (label) label.title = reason;
+  if (reason) {
+    checkbox.setAttribute('aria-description', reason);
+  } else {
+    checkbox.removeAttribute('aria-description');
   }
-  const status = root.querySelector<HTMLElement>('#telemetry-status');
-  if (status) {
-    status.textContent = telemetryStatus(state);
-  }
+}
+
+/** 적용 버튼만 부분 갱신해 진행 중에도 닉네임·언어·동의 체크박스의 DOM을 유지합니다. */
+export function updateSettingsBusy(root: HTMLElement, busy: boolean): void {
+  const apply = root.querySelector<HTMLButtonElement>('.settings-card button[type="submit"]');
+  if (!apply) return;
+  apply.disabled = busy;
+  apply.textContent = busy ? '적용 중…' : '적용';
 }

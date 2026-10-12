@@ -17,7 +17,6 @@ import { UsageQueue, type BatchSender } from './usageQueue';
 const CONFIGURATION = 'leetcodeStudyHelper';
 const SETTING = 'telemetry.enabled';
 const INSTALLATION_KEY = 'telemetry.installationId.v1';
-const PROMPT_KEY = 'telemetry.promptShown.v1';
 const SETUP_KEY = 'telemetry.setupReady.v1';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/;
@@ -51,6 +50,7 @@ export class TelemetryService implements vscode.Disposable, UsageRecorder {
   private snapshot: ExtensionSnapshot | undefined;
   private viewOpened = false;
   private promptScheduled = false;
+  private promptPending = false;
   private sessionRecorded = false;
   private setupRecorded = false;
   private accepted = false;
@@ -222,9 +222,9 @@ export class TelemetryService implements vscode.Disposable, UsageRecorder {
 
   /** 반복 스냅샷은 기능 이벤트가 아니며 최초 관측 두 종류만 중복 없이 처리합니다. */
   private observeCurrent(): void {
-    if (!this.viewOpened || !this.snapshot?.repositories.length || this.disposed) return;
+    if (!this.viewOpened || !this.snapshot || this.disposed) return;
     void this.maybePrompt();
-    if (!this.allowed()) return;
+    if (!this.snapshot.repositories.length || !this.allowed()) return;
     const language = this.snapshot.preferredLanguage;
     if (!this.sessionRecorded)
       this.sessionRecorded = this.record('study_session_started', {
@@ -241,41 +241,52 @@ export class TelemetryService implements vscode.Disposable, UsageRecorder {
     }
   }
 
-  /** 최초 안내는 전역 명시 선택·호스트 정책을 확인하고 한 번만 표시합니다. 닫기는 동의로 취급하지 않습니다. */
+  /** 명시 선택이 없을 때 모달로 안내하며 거절·닫기는 false로 저장합니다. 설정 삭제 시 다시 안내합니다. */
   private async maybePrompt(): Promise<void> {
-    if (this.promptScheduled || !this.hostAllowsUsage() || this.pendingSetting) return;
     const configured = vscode.workspace
       .getConfiguration(CONFIGURATION)
       .inspect<boolean>(SETTING)?.globalValue;
-    if (configured !== undefined || this.context.globalState.get<boolean>(PROMPT_KEY, false))
+    if (configured !== undefined) {
+      this.promptScheduled = false;
+      return;
+    }
+    if (
+      this.promptScheduled ||
+      this.promptPending ||
+      this.disposed ||
+      this.closing ||
+      this.context.extensionMode !== vscode.ExtensionMode.Production ||
+      this.pendingSetting
+    )
       return;
     this.promptScheduled = true;
+    this.promptPending = true;
     try {
-      await this.context.globalState.update(PROMPT_KEY, true);
-      if (
-        this.disposed ||
-        !this.hostAllowsUsage() ||
-        vscode.workspace.getConfiguration(CONFIGURATION).inspect<boolean>(SETTING)?.globalValue !==
-          undefined
-      )
-        return;
       const settingsRevision = this.settingsRevision;
       const choice = await vscode.window.showInformationMessage(
-        '확장 개선을 위해 무작위 설치 식별자, 기능·문제·주차·언어·실행 결과를 PostHog(US)에 보내도 될까요? 닉네임·코드·파일 경로는 보내지 않습니다. 설정에서 언제든 변경할 수 있습니다.',
-        '허용',
+        '사용 통계 수집에 동의하시겠습니까?',
+        {
+          modal: true,
+          detail:
+            '확장 개선을 위해 무작위 설치 식별자와 기능·문제·주차·언어·실행 결과를 PostHog(US)에 보냅니다. 닉네임·코드·파일 경로·저장소 주소는 보내지 않습니다. VS Code 사용 통계가 꺼져 있으면 동의해도 전송하지 않습니다. 설정에서 언제든 끌 수 있습니다.',
+        },
+        '동의',
         '수집하지 않음',
       );
       if (
         !this.disposed &&
-        choice &&
+        !this.closing &&
         settingsRevision === this.settingsRevision &&
         vscode.workspace.getConfiguration(CONFIGURATION).inspect<boolean>(SETTING)?.globalValue ===
           undefined
       ) {
-        await this.setEnabled(choice === '허용');
+        await this.setEnabled(choice === '동의');
       }
     } catch {
       /* 안내·설정 실패로 학습 기능을 막지 않습니다. */
+    } finally {
+      this.promptPending = false;
+      this.observeCurrent();
     }
   }
 

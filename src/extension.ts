@@ -54,6 +54,22 @@ export function activate(context: vscode.ExtensionContext): void {
         (candidateId: string) => controller.runCurrentSolution(candidateId),
       ),
     );
+
+    if (context.extensionMode === vscode.ExtensionMode.Test) {
+      context.subscriptions.push(
+        vscode.commands.registerCommand(
+          'leetcodeStudyHelper.__setTelemetryEnabled',
+          async (enabled: boolean) => {
+            await telemetry?.setEnabled(enabled);
+            return telemetry?.state;
+          },
+        ),
+        vscode.commands.registerCommand(
+          'leetcodeStudyHelper.__getTelemetryState',
+          () => telemetry?.state,
+        ),
+      );
+    }
   } catch (error) {
     telemetry.dispose();
     telemetry = undefined;

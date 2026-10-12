@@ -111,6 +111,8 @@ describe('webview state rendering', () => {
     expect(nickname.value).toBe('edited-name');
     expect(document.querySelector('.problem-card')).toBe(problemCard);
     expect(document.querySelector<HTMLInputElement>('#telemetry-enabled')?.checked).toBe(true);
-    expect(document.querySelector('#telemetry-status')?.textContent).toContain('개발·테스트');
+    expect(document.querySelector<HTMLInputElement>('#telemetry-enabled')?.title).toContain(
+      '개발·테스트',
+    );
   });
 });

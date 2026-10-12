@@ -72,6 +72,12 @@ interface LineLintFixResult {
   ignored: number;
 }
 
+interface TelemetrySettingsSnapshot {
+  enabled: boolean;
+  effectiveEnabled: boolean;
+  disabledReason?: 'vscode' | 'development' | 'storage';
+}
+
 async function waitForState(
   predicate: (state: ExtensionSnapshot) => boolean,
   timeoutMs = 5_000,
@@ -121,6 +127,36 @@ suite('LeetCode Study Helper integration', () => {
     assert.equal(typeof api.git.path, 'string');
     const { stdout } = await execFileAsync(api.git.path, ['--version']);
     assert.match(stdout, /^git version /);
+  });
+
+  test('saves telemetry independently and reflects real configuration changes without collecting in tests', async () => {
+    const original = configuration.inspect<boolean>('telemetry.enabled')?.globalValue;
+    try {
+      for (const enabled of [true, false, true, false]) {
+        const state = await vscode.commands.executeCommand<TelemetrySettingsSnapshot>(
+          'leetcodeStudyHelper.__setTelemetryEnabled',
+          enabled,
+        );
+        assert.equal(configuration.inspect<boolean>('telemetry.enabled')?.globalValue, enabled);
+        assert.equal(state?.enabled, enabled);
+        assert.equal(state?.effectiveEnabled, false);
+        const current = vscode.workspace.getConfiguration('leetcodeStudyHelper');
+        assert.equal(current.get('nickname'), 'CaseUser');
+        assert.equal(current.get('preferredLanguage'), 'python3');
+      }
+
+      await configuration.update('telemetry.enabled', true, vscode.ConfigurationTarget.Global);
+      const state = await vscode.commands.executeCommand<TelemetrySettingsSnapshot>(
+        'leetcodeStudyHelper.__getTelemetryState',
+      );
+      assert.deepEqual(state, {
+        enabled: true,
+        effectiveEnabled: false,
+        disabledReason: 'development',
+      });
+    } finally {
+      await configuration.update('telemetry.enabled', original, vscode.ConfigurationTarget.Global);
+    }
   });
 
   test('detects both workspace roots and matches case-sensitively', async () => {

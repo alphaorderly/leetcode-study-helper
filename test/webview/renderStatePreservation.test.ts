@@ -132,7 +132,97 @@ describe('webview statePreservation', () => {
     expect(panel.open).toBe(true);
     expect(root.scrollTop).toBe(95);
     expect(checkbox.checked).toBe(true);
-    expect(root.querySelector('#telemetry-status')?.textContent).toContain('허용했습니다');
+    expect(checkbox.title).toBe('');
+    expect(checkbox.hasAttribute('aria-description')).toBe(false);
+  });
+
+  it('keeps a pressed telemetry checkbox connected during unrelated repository updates', () => {
+    const post = vi.fn();
+    const renderer = new WebviewRenderer(root, ui, post);
+    renderer.updateState(snapshot);
+    const panel = root.querySelector<HTMLDetailsElement>('.settings-panel')!;
+    panel.open = true;
+    const checkbox = root.querySelector<HTMLInputElement>('#telemetry-enabled')!;
+    const nickname = root.querySelector<HTMLInputElement>('#nickname')!;
+    const language = root.querySelector<HTMLSelectElement>('#preferred-language')!;
+    nickname.value = '작성 중인 닉네임';
+    language.value = 'typescript';
+    checkbox.focus();
+    checkbox.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+
+    renderer.updateState({
+      ...snapshot,
+      repositories: snapshot.repositories.map((repository) => ({
+        ...repository,
+        gitRemote: 'upstream',
+      })),
+    });
+
+    expect(checkbox.isConnected).toBe(true);
+    expect(root.querySelector('#telemetry-enabled')).toBe(checkbox);
+    expect(root.querySelector('#nickname')).toBe(nickname);
+    expect(root.querySelector('#preferred-language')).toBe(language);
+    expect(nickname.value).toBe('작성 중인 닉네임');
+    expect(language.value).toBe('typescript');
+    expect(document.activeElement).toBe(checkbox);
+    checkbox.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    checkbox.click();
+    expect(post).toHaveBeenCalledExactlyOnceWith({ type: 'setTelemetryEnabled', enabled: true });
+  });
+
+  it('updates only the settings apply button when busy changes', () => {
+    const renderer = new WebviewRenderer(root, ui, vi.fn());
+    renderer.updateState(snapshot);
+    const nickname = root.querySelector<HTMLInputElement>('#nickname')!;
+    const language = root.querySelector<HTMLSelectElement>('#preferred-language')!;
+    const checkbox = root.querySelector<HTMLInputElement>('#telemetry-enabled')!;
+    const apply = root.querySelector<HTMLButtonElement>('.settings-card button[type="submit"]')!;
+    nickname.value = 'unfinished';
+    language.value = 'typescript';
+    nickname.focus();
+    nickname.setSelectionRange(1, 4);
+    root.scrollTop = 95;
+
+    renderer.updateBusy(true);
+    expect(apply.disabled).toBe(true);
+    expect(apply.textContent).toBe('적용 중…');
+    renderer.updateBusy(false);
+
+    expect(root.querySelector('#nickname')).toBe(nickname);
+    expect(root.querySelector('#preferred-language')).toBe(language);
+    expect(root.querySelector('#telemetry-enabled')).toBe(checkbox);
+    expect(root.querySelector('.settings-card button[type="submit"]')).toBe(apply);
+    expect(nickname.value).toBe('unfinished');
+    expect(language.value).toBe('typescript');
+    expect(document.activeElement).toBe(nickname);
+    expect([nickname.selectionStart, nickname.selectionEnd]).toEqual([1, 4]);
+    expect(root.scrollTop).toBe(95);
+    expect(apply.disabled).toBe(false);
+    expect(apply.textContent).toBe('적용');
+  });
+
+  it('refreshes the short disabled tooltip without replacing the checkbox or leaving stale text', () => {
+    const renderer = new WebviewRenderer(root, ui, vi.fn());
+    renderer.updateState(snapshot);
+    const checkbox = root.querySelector<HTMLInputElement>('#telemetry-enabled')!;
+    const label = root.querySelector<HTMLLabelElement>('.telemetry-label')!;
+
+    renderer.updateTelemetryState({
+      enabled: true,
+      effectiveEnabled: false,
+      disabledReason: 'vscode',
+    });
+    expect(checkbox.title).toContain('VS Code');
+    expect(label.title).toBe(checkbox.title);
+    expect(checkbox.getAttribute('aria-description')).toBe(checkbox.title);
+    expect(root.querySelector('.telemetry-settings')?.textContent).toBe('사용 통계');
+    renderer.updateTelemetryState({ enabled: true, effectiveEnabled: true });
+
+    expect(root.querySelector('#telemetry-enabled')).toBe(checkbox);
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.title).toBe('');
+    expect(label.title).toBe('');
+    expect(checkbox.hasAttribute('aria-description')).toBe(false);
   });
 
   it('preserves commit input and graph scroll when telemetry changes or saving fails', () => {

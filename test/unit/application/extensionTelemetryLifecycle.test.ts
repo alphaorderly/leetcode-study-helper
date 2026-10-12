@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('vscode', () => ({
+  ExtensionMode: { Production: 1, Development: 2, Test: 3 },
   window: { registerWebviewViewProvider: mocks.registerProvider },
   commands: { registerCommand: mocks.registerCommand, executeCommand: vi.fn() },
 }));
@@ -63,9 +64,9 @@ vi.mock('../../../src/webview/host/studyWebviewProvider', () => ({
 
 import { activate, deactivate } from '../../../src/extension';
 
-function context(): vscode.ExtensionContext {
+function context(extensionMode = 1): vscode.ExtensionContext {
   return {
-    extensionMode: 1,
+    extensionMode,
     extensionUri: { toString: () => 'file:///extension' },
     globalState: { get: vi.fn(), update: vi.fn() },
     subscriptions: [],
@@ -85,6 +86,20 @@ afterEach(async () => {
 });
 
 describe('extension telemetry ownership', () => {
+  it.each([1, 2])('does not expose telemetry test commands in mode %s', (mode) => {
+    activate(context(mode));
+    const registered = mocks.registerCommand.mock.calls.map(([name]) => name);
+    expect(registered).not.toContain('leetcodeStudyHelper.__setTelemetryEnabled');
+    expect(registered).not.toContain('leetcodeStudyHelper.__getTelemetryState');
+  });
+
+  it('exposes telemetry settings commands only in the integration test host', () => {
+    activate(context(3));
+    const registered = mocks.registerCommand.mock.calls.map(([name]) => name);
+    expect(registered).toContain('leetcodeStudyHelper.__setTelemetryEnabled');
+    expect(registered).toContain('leetcodeStudyHelper.__getTelemetryState');
+  });
+
   it('keeps graceful shutdown alive while VS Code synchronously disposes subscriptions', async () => {
     const extensionContext = context();
     activate(extensionContext);

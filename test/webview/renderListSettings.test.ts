@@ -434,11 +434,10 @@ describe('webview listSettings', () => {
 
     expect(checkbox.checked).toBe(false);
     expect(checkbox.closest('form')).toBeNull();
-    expect(checkbox.getAttribute('aria-describedby')).toBe(
-      'telemetry-description telemetry-status',
-    );
-    expect(root.querySelector('#telemetry-description')?.textContent).toContain('PostHog US');
-    expect(root.querySelector('#telemetry-status')?.textContent).toContain('수집하지 않습니다');
+    expect(root.querySelector('.telemetry-label')?.textContent).toBe('사용 통계');
+    expect(root.querySelector('.telemetry-settings p')).toBeNull();
+    expect(root.querySelector('#telemetry-description')).toBeNull();
+    expect(root.querySelector('#telemetry-status')).toBeNull();
     nickname.value = '';
     expect(nickname.checkValidity()).toBe(false);
 
@@ -470,10 +469,30 @@ describe('webview listSettings', () => {
 
     expect(checkbox.checked).toBe(true);
     expect(checkbox.disabled).toBe(false);
-    expect(root.querySelector('#telemetry-status')?.textContent).toContain('VS Code');
+    expect(checkbox.title).toContain('VS Code');
+    expect(checkbox.getAttribute('aria-description')).toBe(checkbox.title);
     checkbox.click();
 
     expect(post).toHaveBeenCalledWith({ type: 'setTelemetryEnabled', enabled: false });
+  });
+
+  it('toggles independently by clicking the short checkbox label', () => {
+    const post = vi.fn();
+    renderApp(root, snapshot, ui, post);
+    const label = root.querySelector<HTMLLabelElement>('.telemetry-label')!;
+    const checkbox = root.querySelector<HTMLInputElement>('#telemetry-enabled')!;
+    const nickname = root.querySelector<HTMLInputElement>('#nickname')!;
+    nickname.value = '';
+
+    label.click();
+    expect(checkbox.checked).toBe(true);
+    label.click();
+    expect(checkbox.checked).toBe(false);
+    expect(post.mock.calls).toEqual([
+      [{ type: 'setTelemetryEnabled', enabled: true }],
+      [{ type: 'setTelemetryEnabled', enabled: false }],
+    ]);
+    expect(nickname.value).toBe('');
   });
 
   it('filters by status and search text', () => {

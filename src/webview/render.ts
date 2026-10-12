@@ -8,7 +8,7 @@ import { hasRepositories, listChromeHidden } from './state/shellModel';
 import type { PostMessage, UiState, ViewContext } from './state/viewTypes';
 import { CurrentProblemViewRenderer } from './views/currentProblemView';
 import { renderProblemList } from './views/problemListView';
-import { renderSettings, updateTelemetrySettings } from './views/settingsView';
+import { renderSettings, updateSettingsBusy, updateTelemetrySettings } from './views/settingsView';
 import { renderControls, renderIssues, renderNotices, renderViewTabs } from './views/shellView';
 import { renderSubmissionView } from './views/submissionView';
 
@@ -30,6 +30,7 @@ export class WebviewRenderer {
   private readonly issuesRegion = element('div', 'app-region app-issues-region');
   private readonly currentProblemView = new CurrentProblemViewRenderer();
   private state: ExtensionSnapshot | undefined;
+  private settingsSignature: string | undefined;
 
   /** UI 상태와 전송 함수를 보관하고 재사용할 화면 영역을 구성합니다. */
   constructor(
@@ -112,10 +113,29 @@ export class WebviewRenderer {
     this.updateBusyAttribute();
   }
 
-  /** 현재 스냅샷의 설정 폼으로 설정 영역을 교체합니다. */
+  /** 설정 값이 바뀐 경우만 폼을 교체하고 저장소·진행 상태 갱신에서는 입력과 클릭을 유지합니다. */
   private renderSettings(): void {
     const context = this.context();
-    this.settingsRegion.replaceChildren(...(context ? [renderSettings(context)] : []));
+    if (!context) {
+      this.settingsSignature = undefined;
+      this.settingsRegion.replaceChildren();
+      return;
+    }
+    const signature = JSON.stringify([
+      context.state.nickname,
+      context.state.preferredLanguage,
+      context.state.languages,
+    ]);
+    if (signature !== this.settingsSignature) {
+      this.settingsSignature = signature;
+      this.settingsRegion.replaceChildren(renderSettings(context));
+      return;
+    }
+    updateTelemetrySettings(
+      this.settingsRegion,
+      context.state.telemetry ?? { enabled: false, effectiveEnabled: false },
+    );
+    updateSettingsBusy(this.settingsRegion, context.ui.busy);
   }
 
   /** 닉네임 미설정과 지원 저장소 미발견 안내를 갱신합니다. */

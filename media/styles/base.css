@@ -167,6 +167,8 @@ select {
   display: flex;
   gap: 7px;
   align-items: center;
+  min-height: 24px;
+  width: fit-content;
   cursor: pointer;
 }
 
@@ -182,14 +184,6 @@ select {
 .telemetry-checkbox:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, var(--vscode-foreground));
   outline-offset: 2px;
-}
-
-.telemetry-description,
-.telemetry-status {
-  margin: 0;
-  color: var(--vscode-descriptionForeground);
-  font-size: 0.84em;
-  line-height: 1.5;
 }
 
 .text-input,

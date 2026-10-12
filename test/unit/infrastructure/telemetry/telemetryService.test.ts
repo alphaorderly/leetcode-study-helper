@@ -338,23 +338,24 @@ describe('TelemetryService consent and host policy', () => {
 });
 
 describe('TelemetryService prompt and milestones', () => {
-  it('defers the one-time prompt while VS Code collection is off', async () => {
+  it('shows initial consent with VS Code collection off without bypassing the host gate', async () => {
     mocks.hostEnabled = false;
-    const { service, storage, uuid } = createService();
+    const { service, storage, uuid, sender } = createService();
     service.observe(snapshot(), { viewOpened: true });
     await settle();
-    expect(mocks.prompt).not.toHaveBeenCalled();
+    expect(mocks.prompt).toHaveBeenCalledOnce();
     expect(storage.has(PROMPT_KEY)).toBe(false);
     mocks.hostEnabled = true;
     hostChanged();
     await settle();
     expect(mocks.prompt).toHaveBeenCalledOnce();
-    expect(storage.get(PROMPT_KEY)).toBe(true);
+    expect(storage.has(PROMPT_KEY)).toBe(false);
     expect(uuid).not.toHaveBeenCalled();
     service.observe(snapshot(), { viewOpened: true });
     await settle();
     expect(mocks.prompt).toHaveBeenCalledOnce();
-    expect(mocks.settingUpdate).not.toHaveBeenCalled();
+    expect(mocks.settingUpdate).toHaveBeenCalledExactlyOnceWith('telemetry.enabled', false, 1);
+    expect(sender).not.toHaveBeenCalled();
   });
 
   it.each([false, true])(
@@ -372,7 +373,7 @@ describe('TelemetryService prompt and milestones', () => {
     first.service.observe(snapshot(), { viewOpened: true });
     await settle();
     first.service.dispose();
-    const second = createService({ storage: first.storage });
+    const second = createService({ consent: mocks.globalValue, storage: first.storage });
     second.service.observe(snapshot(), { viewOpened: true });
     await settle();
     expect(mocks.prompt).toHaveBeenCalledOnce();
@@ -381,9 +382,9 @@ describe('TelemetryService prompt and milestones', () => {
   });
 
   it.each([
-    { choice: undefined, enabled: false, writes: 0 },
+    { choice: undefined, enabled: false, writes: 1 },
     { choice: '수집하지 않음', enabled: false, writes: 1 },
-    { choice: '허용', enabled: true, writes: 1 },
+    { choice: '동의', enabled: true, writes: 1 },
   ])(
     'only an explicit allow choice enables collection: $choice',
     async ({ choice, enabled, writes }) => {
@@ -393,11 +394,199 @@ describe('TelemetryService prompt and milestones', () => {
       await settle();
       expect(service.state.enabled).toBe(enabled);
       expect(mocks.settingUpdate).toHaveBeenCalledTimes(writes);
-      expect(storage.get(PROMPT_KEY)).toBe(true);
-      if (enabled)
-        expect(mocks.settingUpdate).toHaveBeenCalledExactlyOnceWith('telemetry.enabled', true, 1);
+      expect(storage.has(PROMPT_KEY)).toBe(false);
+      expect(mocks.settingUpdate).toHaveBeenCalledExactlyOnceWith('telemetry.enabled', enabled, 1);
       await service.shutdown();
       expect(sender.mock.calls.length).toBe(enabled ? 1 : 0);
+    },
+  );
+
+  it('uses a short native modal title and puts the data policy in its detail', async () => {
+    const { service } = createService();
+    service.observe(snapshot(), { viewOpened: true });
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledExactlyOnceWith(
+      '사용 통계 수집에 동의하시겠습니까?',
+      { modal: true, detail: expect.stringContaining('무작위 설치 식별자') },
+      '동의',
+      '수집하지 않음',
+    );
+    const options = mocks.prompt.mock.calls[0]?.[1] as { modal: boolean; detail: string };
+    expect(options.detail).toContain('PostHog(US)');
+    expect(options.detail).toContain('닉네임·코드·파일 경로·저장소 주소는 보내지 않습니다');
+    expect(options.detail).toContain('VS Code 사용 통계가 꺼져 있으면 동의해도 전송하지 않습니다');
+  });
+
+  it('ignores a legacy prompt-shown marker when no global choice exists', async () => {
+    const storage = new Map<string, unknown>([[PROMPT_KEY, true]]);
+    const { service, uuid } = createService({ storage });
+    service.observe(snapshot(), { viewOpened: true });
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+    expect(mocks.globalValue).toBe(false);
+    expect(uuid).not.toHaveBeenCalled();
+  });
+
+  it('asks again when the user removes a previously saved choice in the same session', async () => {
+    const { service } = createService();
+    service.observe(snapshot(), { viewOpened: true });
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+    expect(mocks.globalValue).toBe(false);
+    mocks.globalValue = undefined;
+    configurationChanged();
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledTimes(2);
+    expect(mocks.globalValue).toBe(false);
+    service.observe(snapshot());
+    service.observe(snapshot());
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledTimes(2);
+  });
+
+  it('prevents repeated and overlapping modals while a choice is pending', async () => {
+    const firstChoice = deferred<string | undefined>();
+    mocks.prompt.mockReturnValueOnce(firstChoice.promise);
+    const { service, uuid } = createService();
+    service.observe(snapshot(), { viewOpened: true });
+    service.observe(snapshot());
+    service.observe(snapshot(), { viewOpened: true });
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+    await service.setEnabled(false);
+    mocks.globalValue = undefined;
+    configurationChanged();
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+    firstChoice.resolve('동의');
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledTimes(2);
+    expect(mocks.globalValue).toBe(false);
+    expect(uuid).not.toHaveBeenCalled();
+  });
+
+  it('does not repeat the modal in one session if storing the dismissed choice fails', async () => {
+    mocks.settingUpdate.mockRejectedValueOnce(new Error('cannot save choice'));
+    const { service, uuid, sender } = createService();
+    service.observe(snapshot(), { viewOpened: true });
+    await settle();
+    service.observe(snapshot());
+    service.observe(snapshot(), { viewOpened: true });
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+    expect(service.state.enabled).toBe(false);
+    expect(service.state.effectiveEnabled).toBe(false);
+    expect(mocks.globalValue).toBeUndefined();
+    expect(uuid).not.toHaveBeenCalled();
+    await service.shutdown();
+    expect(sender).not.toHaveBeenCalled();
+  });
+
+  it('keeps checkbox preferences changeable while VS Code disables actual collection', async () => {
+    mocks.hostEnabled = false;
+    const { service, uuid, sender } = createService();
+    service.observe(snapshot(), { viewOpened: true });
+    await service.setEnabled(true);
+    expect(service.state).toEqual({
+      enabled: true,
+      effectiveEnabled: false,
+      disabledReason: 'vscode',
+    });
+    await service.setEnabled(false);
+    expect(service.state).toEqual({ enabled: false, effectiveEnabled: false });
+    expect(mocks.settingUpdate.mock.calls.map((call) => call[1])).toEqual([true, false]);
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+    expect(uuid).not.toHaveBeenCalled();
+    await service.shutdown();
+    expect(sender).not.toHaveBeenCalled();
+  });
+
+  it('waits for an opened sidebar and shows consent even without a supported repository', async () => {
+    const { service } = createService();
+    service.observe(snapshot());
+    await settle();
+    expect(mocks.prompt).not.toHaveBeenCalled();
+    service.observe({ ...snapshot(), repositories: [] }, { viewOpened: true });
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+    service.observe(snapshot());
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+  });
+
+  it('saves consent in an unsupported workspace without recording study or setup events', async () => {
+    mocks.prompt.mockResolvedValueOnce('동의');
+    const { service, sender, storage } = createService();
+    const unsupported = { ...snapshot(), repositories: [] };
+    service.observe(unsupported, { viewOpened: true });
+    await settle();
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+    expect(mocks.settingUpdate).toHaveBeenCalledExactlyOnceWith('telemetry.enabled', true, 1);
+    expect(service.state.enabled).toBe(true);
+    service.observe(unsupported);
+    await settle();
+    expect(mocks.logUsage).not.toHaveBeenCalled();
+    expect(storage.has(SETUP_KEY)).toBe(false);
+    await service.shutdown();
+    expect(sender).not.toHaveBeenCalled();
+  });
+
+  it.each([2, 3])(
+    'never shows unsupported-workspace consent in nonproduction mode %s',
+    async (mode) => {
+      const { service, sender, uuid } = createService({ mode });
+      service.observe({ ...snapshot(), repositories: [] }, { viewOpened: true });
+      await settle();
+      expect(mocks.prompt).not.toHaveBeenCalled();
+      expect(mocks.settingUpdate).not.toHaveBeenCalled();
+      expect(uuid).not.toHaveBeenCalled();
+      await service.shutdown();
+      expect(sender).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { host: true, usage: true, mode: 2 },
+    { host: true, usage: true, mode: 3 },
+  ])('does not show a modal in development or test hosts ($mode)', async (options) => {
+    mocks.hostEnabled = options.host;
+    mocks.usageEnabled = options.usage;
+    const { service, uuid } = createService({ mode: options.mode });
+    service.observe(snapshot(), { viewOpened: true });
+    await settle();
+    expect(mocks.prompt).not.toHaveBeenCalled();
+    expect(mocks.settingUpdate).not.toHaveBeenCalled();
+    expect(uuid).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { host: false, usage: true, choice: '동의', enabled: true },
+    { host: false, usage: true, choice: '수집하지 않음', enabled: false },
+    { host: false, usage: true, choice: undefined, enabled: false },
+    { host: true, usage: false, choice: '동의', enabled: true },
+    { host: true, usage: false, choice: '수집하지 않음', enabled: false },
+    { host: true, usage: false, choice: undefined, enabled: false },
+  ])(
+    'saves modal choices while host usage is blocked and sends nothing ($host/$usage/$choice)',
+    async (options) => {
+      mocks.hostEnabled = options.host;
+      mocks.usageEnabled = options.usage;
+      mocks.prompt.mockResolvedValueOnce(options.choice);
+      const { service, sender, uuid } = createService();
+      service.observe(snapshot(), { viewOpened: true });
+      await settle();
+      expect(mocks.prompt).toHaveBeenCalledOnce();
+      expect(mocks.settingUpdate).toHaveBeenCalledExactlyOnceWith(
+        'telemetry.enabled',
+        options.enabled,
+        1,
+      );
+      expect(service.state.enabled).toBe(options.enabled);
+      expect(service.state.effectiveEnabled).toBe(false);
+      completeOperation(service);
+      await service.shutdown();
+      expect(uuid).not.toHaveBeenCalled();
+      expect(sender).not.toHaveBeenCalled();
     },
   );
 
@@ -433,7 +622,7 @@ describe('TelemetryService prompt and milestones', () => {
     await settle();
     expect(mocks.prompt).toHaveBeenCalledOnce();
     await service.setEnabled(false);
-    choice.resolve('허용');
+    choice.resolve('동의');
     await settle();
     expect(service.state.enabled).toBe(false);
     expect(mocks.settingUpdate).toHaveBeenCalledExactlyOnceWith('telemetry.enabled', false, 1);
