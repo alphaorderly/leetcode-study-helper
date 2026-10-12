@@ -15,6 +15,13 @@ import {
 } from '../../infrastructure/leetcode/leetcodeTestDataService';
 import type { PythonRunResult } from '../../infrastructure/python/pythonRunnerService';
 import { PythonRunnerService } from '../../infrastructure/python/pythonRunnerService';
+import {
+  beginUsage,
+  NOOP_USAGE,
+  type UsageOperation,
+  type UsageProperties,
+  type UsageRecorder,
+} from '../../shared/telemetry';
 
 const CONFIGURATION_SECTION = 'leetcodeStudyHelper';
 const INSPECTION_DEBOUNCE_MS = 350;
@@ -105,6 +112,7 @@ export class CurrentProblemSession implements vscode.Disposable {
   constructor(
     extensionUri: vscode.Uri,
     dependencies: Partial<CurrentProblemSessionDependencies> = {},
+    private readonly usage: UsageRecorder = NOOP_USAGE,
   ) {
     this.leetCodeApiService = dependencies.leetCodeApiService ?? new LeetCodeApiService();
     this.testDataService =
@@ -189,19 +197,44 @@ export class CurrentProblemSession implements vscode.Disposable {
    * @throws 워크스페이스가 신뢰되지 않거나 후보·테스트 데이터를 사용할 수 없는 경우.
    */
   async run(candidateId: string): Promise<void> {
-    const { selection, candidates } = this.requireRunCandidate(candidateId);
-
-    this.cancelRun();
-    /** 이 실행이 소유한 신호를 입력 읽기부터 결과 게시까지 전달합니다. 이후 선택 변경은 이 신호를 취소합니다. */
-    const controller = new AbortController();
-    this.runController = controller;
-    const prepared = await this.prepareRun(selection, controller);
-    /** 테스트 데이터·소스를 기다리는 동안 다른 파일로 이동했을 수 있으므로 실행 시작 전에 다시 확인합니다. */
-    if (!this.canPublishResult(selection, controller.signal)) {
-      this.releaseRunController(controller);
-      return;
+    const operation = beginUsage(this.usage, 'test_finished', this.runUsageProperties());
+    let outcome: UsageProperties = {
+      outcome: 'error',
+      error_code: 'operation_failed',
+      failure_stage: 'validation',
+    };
+    let controller: AbortController | undefined;
+    try {
+      const { selection, candidates } = this.requireRunCandidate(candidateId);
+      this.cancelRun();
+      /** 이 실행이 소유한 신호를 입력 읽기부터 결과 게시까지 전달합니다. 이후 선택 변경은 이 신호를 취소합니다. */
+      controller = new AbortController();
+      this.runController = controller;
+      outcome = { outcome: 'error', error_code: 'operation_failed', failure_stage: 'prepare' };
+      const prepared = await this.prepareRun(selection, controller);
+      /** 테스트 데이터·소스를 기다리는 동안 다른 파일로 이동했을 수 있으므로 실행 시작 전에 다시 확인합니다. */
+      if (!this.canPublishResult(selection, controller.signal)) {
+        this.releaseRunController(controller);
+        outcome = { outcome: 'cancelled' };
+        return;
+      }
+      outcome = { outcome: 'error', error_code: 'runner', failure_stage: 'execute' };
+      outcome = await this.executeRun(
+        selection,
+        candidates,
+        candidateId,
+        controller,
+        prepared,
+        operation,
+      );
+    } catch (error) {
+      if (controller?.signal.aborted || isCancellation(error)) {
+        outcome = { outcome: 'cancelled' };
+      }
+      throw error;
+    } finally {
+      operation.finish(outcome);
     }
-    await this.executeRun(selection, candidates, candidateId, controller, prepared);
   }
 
   /** 현재 후보와 신뢰 상태를 확인합니다. 실패 시 기존 러너 표시와 진행 중 실행을 유지합니다. */
@@ -256,7 +289,8 @@ export class CurrentProblemSession implements vscode.Disposable {
     candidateId: string,
     controller: AbortController,
     { source, data }: { source: string; data: LeetCodePythonTestData },
-  ): Promise<void> {
+    operation: UsageOperation,
+  ): Promise<UsageProperties> {
     this.setRunner({
       status: 'running',
       candidates,
@@ -274,18 +308,23 @@ export class CurrentProblemSession implements vscode.Disposable {
         controller.signal,
       );
       if (!this.canPublishResult(selection, controller.signal)) {
-        return;
+        return { outcome: 'cancelled' };
       }
+      const outcome = runUsageResult(result);
+      operation.markResult(outcome);
       this.setRunner(toRunnerSnapshot(result, candidates, candidateId));
+      return outcome;
     } catch (error) {
-      if (!controller.signal.aborted && !isCancellation(error)) {
-        this.setRunner({
-          status: 'error',
-          candidates,
-          selectedCandidateId: candidateId,
-          message: error instanceof Error ? error.message : String(error),
-        });
+      if (controller.signal.aborted || isCancellation(error)) {
+        return { outcome: 'cancelled' };
       }
+      this.setRunner({
+        status: 'error',
+        candidates,
+        selectedCandidateId: candidateId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return { outcome: 'error', error_code: 'runner', failure_stage: 'execute' };
     } finally {
       this.releaseRunController(controller);
     }
@@ -451,6 +490,15 @@ export class CurrentProblemSession implements vscode.Disposable {
     }
   }
 
+  /** 테스트 요청 시 선택된 문제·주차·언어만 기록하고 선택 파일의 URI와 소스는 제외합니다. */
+  private runUsageProperties(): UsageProperties {
+    const selection = this.selection;
+    const problem = this.repositories
+      .find((repository) => repository.rootUri === selection?.rootUri)
+      ?.problems.find((problem) => problem.slug === selection?.slug);
+    return { problem_slug: selection?.slug, study_week: problem?.week, language: 'python3' };
+  }
+
   /** 열린 문서가 있으면 편집 중인 내용을 사용하고, 없으면 파일에서 소스를 읽습니다. */
   private async currentSource(uriString: string): Promise<string> {
     const document = vscode.workspace.textDocuments.find(({ uri }) => uri.toString() === uriString);
@@ -510,6 +558,20 @@ export class CurrentProblemSession implements vscode.Disposable {
     this.runController?.abort();
     this.runController = undefined;
   }
+}
+
+/** 테스트 집계와 정해진 러너 오류 코드만 반환하며 진단 출력·소스는 통계에 포함하지 않습니다. */
+function runUsageResult(result: PythonRunResult): UsageProperties {
+  if (result.ok) {
+    return { outcome: result.outcome, passed: result.passed, total: result.total };
+  }
+  const errorCode =
+    result.kind === 'missingObjects'
+      ? 'missing_objects'
+      : result.kind === 'syntax' || result.kind === 'candidate' || result.kind === 'execution'
+        ? result.kind
+        : 'runner';
+  return { outcome: 'error', error_code: errorCode, failure_stage: 'execute' };
 }
 
 /** Python 실행 결과를 화면 상태로 변환하며 실행 실패와 테스트 실패를 구분합니다. */

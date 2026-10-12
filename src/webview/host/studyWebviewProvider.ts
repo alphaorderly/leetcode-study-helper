@@ -1,6 +1,26 @@
 import * as vscode from 'vscode';
-import type { ExtensionToWebviewMessage, WebviewToExtensionMessage } from '../../shared/contracts';
+import type {
+  ExtensionSnapshot,
+  ExtensionToWebviewMessage,
+  TelemetrySettingsSnapshot,
+  WebviewToExtensionMessage,
+} from '../../shared/contracts';
 import type { StudyController } from '../../application/studyController';
+
+/** 동의 상태 표시와 변경만 웹뷰에 제공하는 통계 서비스 경계입니다. */
+export interface TelemetrySettingsPort {
+  readonly state: TelemetrySettingsSnapshot;
+  readonly onDidChangeState: vscode.Event<TelemetrySettingsSnapshot>;
+  /** 닉네임·언어 설정과 독립적으로 사용 통계 동의를 저장합니다. */
+  setEnabled(enabled: boolean): Promise<void>;
+  /** 저장소와 설정의 현재 상태를 관측하고 최초 보기 열림을 알립니다. */
+  observe(snapshot: ExtensionSnapshot, options?: { viewOpened?: boolean }): void | Promise<void>;
+}
+
+const DISABLED_TELEMETRY: TelemetrySettingsSnapshot = {
+  enabled: false,
+  effectiveEnabled: false,
+};
 
 /** 웹뷰의 스크립트 허용 nonce로 사용할 32자리 영숫자 문자열을 생성합니다. */
 function nonce(): string {
@@ -13,6 +33,7 @@ function nonce(): string {
 const WEBVIEW_MESSAGE_TYPES: Record<WebviewToExtensionMessage['type'], true> = {
   ready: true,
   saveSettings: true,
+  setTelemetryEnabled: true,
   openSolution: true,
   openOtherSolution: true,
   openProblem: true,
@@ -35,13 +56,17 @@ const WEBVIEW_MESSAGE_TYPES: Record<WebviewToExtensionMessage['type'], true> = {
   signInGitHub: true,
 };
 
-/** 알려진 메시지 type인지 확인하며 개별 payload 필드의 유효성까지 검사하지는 않습니다. */
+/** 알려진 메시지 종류를 확인하고 사용 통계 설정은 boolean 값만 허용합니다. */
 function isWebviewMessage(value: unknown): value is WebviewToExtensionMessage {
   if (typeof value !== 'object' || value === null || !('type' in value)) {
     return false;
   }
   const type = (value as { type?: unknown }).type;
-  return typeof type === 'string' && Object.hasOwn(WEBVIEW_MESSAGE_TYPES, type);
+  return (
+    typeof type === 'string' &&
+    Object.hasOwn(WEBVIEW_MESSAGE_TYPES, type) &&
+    (type !== 'setTelemetryEnabled' || ('enabled' in value && typeof value.enabled === 'boolean'))
+  );
 }
 
 /**
@@ -57,15 +82,24 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly controller: StudyController,
+    private readonly telemetry?: TelemetrySettingsPort,
   ) {
     this.changeSubscriptions = [
       controller.onDidChange((state) => {
-        void this.post({ type: 'state', state });
+        this.observeTelemetry(state);
+        void this.post({ type: 'state', state: this.withTelemetry(state) });
       }),
       controller.onDidChangeCurrentProblem((currentProblem) => {
         void this.post({ type: 'currentProblem', currentProblem });
       }),
     ];
+    if (telemetry) {
+      this.changeSubscriptions.push(
+        telemetry.onDidChangeState((state) => {
+          void this.post({ type: 'telemetryState', state });
+        }),
+      );
+    }
   }
 
   /** 웹뷰의 리소스·스크립트 옵션과 HTML을 설정하고 수신 메시지를 명령에 연결합니다. */
@@ -119,9 +153,23 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
       switch (message.type) {
         case 'ready': {
           await this.controller.getState();
-          await this.post({ type: 'state', state: this.controller.currentSnapshot });
+          this.observeTelemetry(this.controller.currentSnapshot, true);
+          await this.post({
+            type: 'state',
+            state: this.withTelemetry(this.controller.currentSnapshot),
+          });
           break;
         }
+        case 'setTelemetryEnabled':
+          try {
+            await this.telemetry?.setEnabled(message.enabled);
+          } finally {
+            await this.post({
+              type: 'telemetryState',
+              state: this.telemetry?.state ?? DISABLED_TELEMETRY,
+            });
+          }
+          break;
         case 'saveSettings':
           await this.withBusy(() =>
             this.controller.saveSettings(message.nickname, message.preferredLanguage),
@@ -196,6 +244,23 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
       }
     } catch (error) {
       await vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** 컨트롤러 상태를 바꾸지 않고 사용 통계 설정의 표시 상태를 덧붙입니다. */
+  private withTelemetry(state: ExtensionSnapshot): ExtensionSnapshot {
+    return { ...state, telemetry: this.telemetry?.state ?? DISABLED_TELEMETRY };
+  }
+
+  /** 통계 관측 실패가 화면 표시와 사용자 명령으로 전파되지 않도록 분리합니다. */
+  private observeTelemetry(state: ExtensionSnapshot, viewOpened = false): void {
+    try {
+      const observed = this.telemetry?.observe(state, { viewOpened });
+      if (observed) {
+        void observed.catch(() => {});
+      }
+    } catch {
+      // 통계 관측은 사용자 작업과 화면 표시를 중단하지 않습니다.
     }
   }
 

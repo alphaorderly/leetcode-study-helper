@@ -27,6 +27,14 @@ import {
 } from './sessions/repositoryRefreshSession';
 import { StudyRepositoryService } from '../infrastructure/workspace/repositoryService';
 import { SolutionFileService } from '../infrastructure/workspace/solutionFileService';
+import {
+  beginUsage,
+  NOOP_USAGE,
+  type UsageEventName,
+  type UsageOperation,
+  type UsageProperties,
+  type UsageRecorder,
+} from '../shared/telemetry';
 
 const CONFIGURATION_SECTION = 'leetcodeStudyHelper';
 
@@ -57,13 +65,7 @@ export class StudyController implements vscode.Disposable {
   /** 루트 URI와 문제 slug별로 마지막에 연 다른 참여자의 파일명을 기록해 다음 후보 탐색에 전달합니다. */
   private readonly lastOtherSolutionNames = new Map<string, string>();
   /** 상태는 getter로 읽게 하고 갱신은 세션에 위임합니다. 생성 시에는 콜백을 보관할 뿐 세션을 호출하지 않습니다. */
-  private readonly submissionCommands = new SubmissionCommands(
-    () => this.snapshot,
-    this.gitStatusService,
-    (forceStatus, forceRemote) =>
-      this.repositoryRefreshSession.refreshGitStatuses(forceStatus, forceRemote),
-    () => this.refresh(),
-  );
+  private readonly submissionCommands: SubmissionCommands;
   /** getState의 최초 전체 탐색 여부입니다. true여도 후속 Git 조회까지 완료되었다는 뜻은 아닙니다. */
   private initialized = false;
   /** 마지막 화면 상태입니다. 초기값은 설정·파일 조회 전에도 유효한 빈 화면을 제공하며 각 이벤트에서 새 객체로 교체합니다. */
@@ -83,12 +85,21 @@ export class StudyController implements vscode.Disposable {
   constructor(
     extensionUri: vscode.Uri,
     private readonly consentState: ConsentState,
+    private readonly usage: UsageRecorder = NOOP_USAGE,
   ) {
-    this.currentProblemSession = new CurrentProblemSession(extensionUri);
+    this.currentProblemSession = new CurrentProblemSession(extensionUri, {}, usage);
     this.repositoryRefreshSession = new RepositoryRefreshSession(
       this.repositoryService,
       this.gitStatusService,
       () => this.prepareRefreshSettings(),
+    );
+    this.submissionCommands = new SubmissionCommands(
+      () => this.snapshot,
+      this.gitStatusService,
+      (forceStatus, forceRemote) =>
+        this.repositoryRefreshSession.refreshGitStatuses(forceStatus, forceRemote),
+      () => this.refresh(),
+      usage,
     );
     this.disposables.push(
       this.gitStatusService,
@@ -170,10 +181,16 @@ export class StudyController implements vscode.Disposable {
 
   /** 현재 목록에 등록된 풀이 파일을 편집기로 엽니다. */
   async openSolution(uriString: string): Promise<void> {
-    this.requireSolution(uriString);
-
-    const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriString));
-    await vscode.window.showTextDocument(document);
+    await this.recordUsage(
+      'solution_open_finished',
+      this.solutionUsageProperties(uriString),
+      async (_operation, setFailureStage) => {
+        this.requireSolution(uriString);
+        setFailureStage('editor');
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uriString));
+        await vscode.window.showTextDocument(document);
+      },
+    );
   }
 
   /**
@@ -185,64 +202,81 @@ export class StudyController implements vscode.Disposable {
     slug: string,
     confirm = true,
   ): Promise<string | undefined> {
-    const { repository } = this.requireProblem(rootUri, slug);
+    return this.recordUsage(
+      'reference_open_finished',
+      { ...this.problemUsageProperties(slug, rootUri), reference_kind: 'other_solution' },
+      async (operation, setFailureStage) => {
+        const { repository } = this.requireProblem(rootUri, slug);
 
-    const preferredLanguage = findLanguage(this.snapshot.preferredLanguage);
-    if (!preferredLanguage) {
-      throw new Error('기본 언어 설정을 확인할 수 없습니다.');
-    }
+        const preferredLanguage = findLanguage(this.snapshot.preferredLanguage);
+        if (!preferredLanguage) {
+          throw new Error('기본 언어 설정을 확인할 수 없습니다.');
+        }
 
-    const key = this.problemKey(rootUri, slug);
-    const uri = await this.repositoryService.findOtherSolution(
-      repository,
-      slug,
-      this.snapshot.nickname,
-      preferredLanguage.extension,
-      this.lastOtherSolutionNames.get(key),
+        setFailureStage('prepare');
+        const key = this.problemKey(rootUri, slug);
+        const uri = await this.repositoryService.findOtherSolution(
+          repository,
+          slug,
+          this.snapshot.nickname,
+          preferredLanguage.extension,
+          this.lastOtherSolutionNames.get(key),
+        );
+        if (!uri) {
+          operation.markResult({ outcome: 'noop' });
+          await vscode.window.showInformationMessage('이 문제에는 다른 참여자의 풀이가 없습니다.');
+          return undefined;
+        }
+
+        if (
+          confirm &&
+          !(await confirmOtherSolutionAccess(this.consentState, () =>
+            vscode.window.showWarningMessage(
+              '다른 참여자의 풀이를 열까요?',
+              {
+                modal: true,
+                detail:
+                  '아직 직접 풀지 않았다면 풀이 내용이 노출될 수 있습니다. 동의하면 다음부터는 다시 묻지 않습니다.',
+              },
+              OTHER_SOLUTION_CONFIRM_LABEL,
+            ),
+          ))
+        ) {
+          operation.markResult({ outcome: 'cancelled' });
+          return undefined;
+        }
+
+        setFailureStage('editor');
+        const document = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(document, { preview: true });
+        this.lastOtherSolutionNames.set(key, uri.path.split('/').pop() ?? uri.path);
+        return uri.toString();
+      },
     );
-    if (!uri) {
-      await vscode.window.showInformationMessage('이 문제에는 다른 참여자의 풀이가 없습니다.');
-      return undefined;
-    }
-
-    if (
-      confirm &&
-      !(await confirmOtherSolutionAccess(this.consentState, () =>
-        vscode.window.showWarningMessage(
-          '다른 참여자의 풀이를 열까요?',
-          {
-            modal: true,
-            detail:
-              '아직 직접 풀지 않았다면 풀이 내용이 노출될 수 있습니다. 동의하면 다음부터는 다시 묻지 않습니다.',
-          },
-          OTHER_SOLUTION_CONFIRM_LABEL,
-        ),
-      ))
-    ) {
-      return undefined;
-    }
-
-    const document = await vscode.workspace.openTextDocument(uri);
-    await vscode.window.showTextDocument(document, { preview: true });
-    this.lastOtherSolutionNames.set(key, uri.path.split('/').pop() ?? uri.path);
-    return uri.toString();
   }
 
   /** 현재 목록에 있는 문제의 LeetCode 페이지를 외부 브라우저로 엽니다. */
   async openProblem(slug: string): Promise<void> {
-    const problemExists = this.snapshot.repositories.some((repository) =>
-      repository.problems.some((problem) => problem.slug === slug),
-    );
-    if (!problemExists) {
-      throw new Error('요청한 문제가 현재 워크스페이스에 없습니다.');
-    }
+    await this.recordUsage(
+      'reference_open_finished',
+      { ...this.problemUsageProperties(slug), reference_kind: 'problem' },
+      async (_operation, setFailureStage) => {
+        const problemExists = this.snapshot.repositories.some((repository) =>
+          repository.problems.some((problem) => problem.slug === slug),
+        );
+        if (!problemExists) {
+          throw new Error('요청한 문제가 현재 워크스페이스에 없습니다.');
+        }
 
-    const problemUri = vscode.Uri.parse(
-      `https://leetcode.com/problems/${encodeURIComponent(slug)}/`,
+        setFailureStage('editor');
+        const problemUri = vscode.Uri.parse(
+          `https://leetcode.com/problems/${encodeURIComponent(slug)}/`,
+        );
+        if (!(await vscode.env.openExternal(problemUri))) {
+          throw new Error('LeetCode 문제 페이지를 열지 못했습니다.');
+        }
+      },
     );
-    if (!(await vscode.env.openExternal(problemUri))) {
-      throw new Error('LeetCode 문제 페이지를 열지 못했습니다.');
-    }
   }
 
   /**
@@ -250,30 +284,38 @@ export class StudyController implements vscode.Disposable {
    * @returns 사용자가 확인을 취소하면 false입니다.
    */
   async openAnswer(rootUri: string, slug: string, confirm = true): Promise<boolean> {
-    const { problem } = this.requireProblem(rootUri, slug);
+    return this.recordUsage(
+      'reference_open_finished',
+      { ...this.problemUsageProperties(slug, rootUri), reference_kind: 'answer' },
+      async (operation, setFailureStage) => {
+        const { problem } = this.requireProblem(rootUri, slug);
 
-    const answerUrl = problem.solutionUrl ? normalizeAnswerUrl(problem.solutionUrl) : undefined;
-    if (!answerUrl) {
-      throw new Error('README.md에서 유효한 정답 URL을 찾을 수 없습니다.');
-    }
+        const answerUrl = problem.solutionUrl ? normalizeAnswerUrl(problem.solutionUrl) : undefined;
+        if (!answerUrl) {
+          throw new Error('README.md에서 유효한 정답 URL을 찾을 수 없습니다.');
+        }
 
-    if (
-      confirm &&
-      !(await confirmAnswerAccess(() =>
-        vscode.window.showWarningMessage(
-          '정답으로 이동합니다.',
-          { modal: true },
-          ANSWER_CONFIRM_LABEL,
-        ),
-      ))
-    ) {
-      return false;
-    }
+        if (
+          confirm &&
+          !(await confirmAnswerAccess(() =>
+            vscode.window.showWarningMessage(
+              '정답으로 이동합니다.',
+              { modal: true },
+              ANSWER_CONFIRM_LABEL,
+            ),
+          ))
+        ) {
+          operation.markResult({ outcome: 'cancelled' });
+          return false;
+        }
 
-    if (!(await vscode.env.openExternal(vscode.Uri.parse(answerUrl)))) {
-      throw new Error('정답 페이지를 열지 못했습니다.');
-    }
-    return true;
+        setFailureStage('editor');
+        if (!(await vscode.env.openExternal(vscode.Uri.parse(answerUrl)))) {
+          throw new Error('정답 페이지를 열지 못했습니다.');
+        }
+        return true;
+      },
+    );
   }
 
   /** 현재 문제 세션에 선택된 문제의 설명 로딩을 요청합니다. */
@@ -314,27 +356,50 @@ export class StudyController implements vscode.Disposable {
    * @returns 연 파일의 URI. 생성이 취소되면 undefined입니다.
    */
   async createSolution(rootUri: string, slug: string, confirm = true): Promise<string | undefined> {
-    if (!vscode.workspace.isTrusted) {
-      throw new Error('풀이 파일을 만들려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    }
+    return this.recordUsage(
+      'solution_create_finished',
+      { ...this.problemUsageProperties(slug, rootUri), language: this.snapshot.preferredLanguage },
+      async (operation, setFailureStage) => {
+        if (!vscode.workspace.isTrusted) {
+          throw new Error('풀이 파일을 만들려면 먼저 워크스페이스를 신뢰해야 합니다.');
+        }
 
-    this.requireProblem(rootUri, slug);
+        this.requireProblem(rootUri, slug);
 
-    const result = await this.solutionFileService.create({
-      rootUri,
-      slug,
-      nickname: this.snapshot.nickname,
-      preferredLanguage: this.snapshot.preferredLanguage,
-      confirm,
-    });
-    if (result.status === 'cancelled') {
-      return undefined;
-    }
+        setFailureStage('execute');
+        const result = await this.solutionFileService.create({
+          rootUri,
+          slug,
+          nickname: this.snapshot.nickname,
+          preferredLanguage: this.snapshot.preferredLanguage,
+          confirm,
+        });
+        if (result.status === 'cancelled') {
+          operation.markResult({ outcome: 'cancelled' });
+          return undefined;
+        }
 
-    const document = await vscode.workspace.openTextDocument(result.uri);
-    await vscode.window.showTextDocument(document);
-    await this.repositoryRefreshSession.refreshProblem(rootUri, slug, true);
-    return result.uri.toString();
+        if (result.status === 'created') {
+          operation.markResult({ outcome: 'completed', create_result: 'created' });
+        }
+        setFailureStage('editor');
+        try {
+          const document = await vscode.workspace.openTextDocument(result.uri);
+          await vscode.window.showTextDocument(document);
+        } catch (error) {
+          if (result.status === 'exists') {
+            operation.markResult({ outcome: 'error', create_result: 'exists' });
+          }
+          throw error;
+        }
+        if (result.status === 'exists') {
+          operation.markResult({ outcome: 'completed', create_result: 'exists' });
+        }
+        setFailureStage('refresh');
+        await this.repositoryRefreshSession.refreshProblem(rootUri, slug, true);
+        return result.uri.toString();
+      },
+    );
   }
 
   /**
@@ -427,6 +492,60 @@ export class StudyController implements vscode.Disposable {
     }
     this.changeEmitter.dispose();
     this.currentProblemEmitter.dispose();
+  }
+
+  /** 명시적인 사용자 작업을 한 번 기록하며 본체 결과 뒤 편집기·갱신 실패는 별도 단계로 남깁니다. */
+  private async recordUsage<T>(
+    name: UsageEventName,
+    properties: UsageProperties,
+    action: (
+      operation: UsageOperation,
+      setFailureStage: (stage: NonNullable<UsageProperties['failure_stage']>) => void,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const operation = beginUsage(this.usage, name, properties);
+    let failureStage: NonNullable<UsageProperties['failure_stage']> = 'validation';
+    try {
+      const result = await action(operation, (stage) => {
+        failureStage = stage;
+      });
+      operation.finish({ outcome: 'completed' });
+      return result;
+    } catch (error) {
+      operation.finish({
+        outcome: 'error',
+        error_code: 'operation_failed',
+        failure_stage: failureStage,
+      });
+      throw error;
+    }
+  }
+
+  /** 현재 목록에 있는 문제의 slug와 주차만 반환하며 자유 형식 URI는 기록하지 않습니다. */
+  private problemUsageProperties(slug: string, rootUri?: string): UsageProperties {
+    const problem = this.snapshot.repositories
+      .filter((repository) => rootUri === undefined || repository.rootUri === rootUri)
+      .flatMap((repository) => repository.problems)
+      .find((problem) => problem.slug === slug);
+    return { problem_slug: problem?.slug, study_week: problem?.week };
+  }
+
+  /** 등록된 풀이의 문제·주차·언어만 반환하며 파일명이나 경로는 포함하지 않습니다. */
+  private solutionUsageProperties(uri: string): UsageProperties {
+    for (const repository of this.snapshot.repositories) {
+      for (const problem of repository.problems) {
+        const solution = problem.solutions.find((solution) => solution.uri === uri);
+        if (solution) {
+          const extension = solution.name.split('.').at(-1)?.toLowerCase();
+          const language =
+            extension === 'py'
+              ? 'python3'
+              : LANGUAGE_OPTIONS.find((item) => item.extension === extension)?.id;
+          return { problem_slug: problem.slug, study_week: problem.week, language };
+        }
+      }
+    }
+    return {};
   }
 
   /** 닉네임과 언어 설정을 읽고 유효하지 않은 값은 빈 닉네임·기본 언어로 대체합니다. */

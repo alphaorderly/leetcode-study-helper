@@ -2,6 +2,17 @@ import * as vscode from 'vscode';
 import type { PreparationAction, ExtensionSnapshot, RepositorySnapshot } from '../shared/contracts';
 import type { GitStatusService } from '../infrastructure/git/gitStatusService';
 import { requireSolution } from './snapshotQueries';
+import {
+  beginUsage,
+  NOOP_USAGE,
+  type UsageEventName,
+  type UsageProperties,
+  type UsageRecorder,
+} from '../shared/telemetry';
+import type {
+  GitOperationObserver,
+  GitOperationResult,
+} from '../infrastructure/git/submission/operationObservation';
 
 /** 제출 명령이 호출하는 Git 기능만 노출하여 조회·구독 수명과 분리합니다. */
 type SubmissionGitService = Pick<
@@ -35,98 +46,162 @@ export class SubmissionCommands {
       forceRemote?: boolean,
     ) => Promise<void>,
     private readonly refreshAll: () => Promise<ExtensionSnapshot>,
+    private readonly usage: UsageRecorder = NOOP_USAGE,
   ) {}
 
   /** 신뢰·풀이·주차를 확인해 스테이징하고 Git 표시 상태를 다시 읽습니다. */
   async stageSolution(uriString: string): Promise<void> {
-    this.requireTrustedWorkspace('풀이를 커밋에 추가하려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const target = requireSolution(this.getSnapshot(), uriString);
-    const repository = this.requireSubmissionRepository(target.rootUri);
-    this.validateSubmissionWeek(repository, target.week);
-    await this.gitStatusService.stageSolution(
-      vscode.Uri.parse(target.rootUri),
-      vscode.Uri.parse(target.uri),
-      target.week,
-      this.submissionSolutions(repository),
+    return this.trackedUsage(
+      'submission_action_finished',
+      'stage',
+      async ({ onResult, complete, setStage, updateProperties }) => {
+        this.requireTrustedWorkspace(
+          '풀이를 커밋에 추가하려면 먼저 워크스페이스를 신뢰해야 합니다.',
+        );
+        const target = requireSolution(this.getSnapshot(), uriString);
+        const repository = this.requireSubmissionRepository(target.rootUri);
+        this.validateSubmissionWeek(repository, target.week);
+        updateProperties({ problem_slug: target.slug, study_week: target.week });
+        setStage('execute');
+        await this.gitStatusService.stageSolution(
+          vscode.Uri.parse(target.rootUri),
+          vscode.Uri.parse(target.uri),
+          target.week,
+          this.submissionSolutions(repository),
+          onResult,
+        );
+        complete();
+        setStage('refresh');
+        await this.refreshGitStatuses(true);
+      },
     );
-    await this.refreshGitStatuses(true);
   }
 
   /** 등록된 풀이의 스테이징을 해제하고 Git 표시 상태를 다시 읽습니다. */
   async unstageSolution(uriString: string): Promise<void> {
-    this.requireTrustedWorkspace('스테이징을 해제하려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const target = requireSolution(this.getSnapshot(), uriString);
-    this.requireSubmissionRepository(target.rootUri, true);
-    await this.gitStatusService.unstageSolution(
-      vscode.Uri.parse(target.rootUri),
-      vscode.Uri.parse(target.uri),
+    return this.trackedUsage(
+      'submission_action_finished',
+      'unstage',
+      async ({ onResult, complete, setStage, updateProperties }) => {
+        this.requireTrustedWorkspace('스테이징을 해제하려면 먼저 워크스페이스를 신뢰해야 합니다.');
+        const target = requireSolution(this.getSnapshot(), uriString);
+        this.requireSubmissionRepository(target.rootUri, true);
+        updateProperties({ problem_slug: target.slug, study_week: target.week });
+        setStage('execute');
+        await this.gitStatusService.unstageSolution(
+          vscode.Uri.parse(target.rootUri),
+          vscode.Uri.parse(target.uri),
+          onResult,
+        );
+        complete();
+        setStage('refresh');
+        await this.refreshGitStatuses(true);
+      },
     );
-    await this.refreshGitStatuses(true);
   }
 
   /** 활성 주차와 스테이징 상태를 확인해 커밋하고 성공하면 Git 표시 상태를 갱신합니다. */
   async commitActiveWeek(rootUri: string, message: string): Promise<void> {
-    this.requireTrustedWorkspace('풀이를 커밋하려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const repository = this.requireSubmissionRepository(rootUri);
-    const submission = repository.submission!;
-    if (!submission.activeSubmissionWeek || submission.stagedFiles.length === 0) {
-      throw new Error('커밋 준비 상태인 풀이가 없습니다.');
-    }
-    if (submission.stagedFiles.some(({ week }) => week !== submission.activeSubmissionWeek)) {
-      throw new Error('서로 다른 주차의 풀이를 한 커밋에 포함할 수 없습니다.');
-    }
-    const stagedUris = new Set(submission.stagedFiles.map(({ uri }) => uri));
-    const stagedOutdated = repository.problems
-      .flatMap(({ solutions }) => solutions)
-      .some(
-        ({ uri, submissionStatus }) =>
-          stagedUris.has(uri) && submissionStatus === 'staged-outdated',
-      );
-    if (stagedOutdated) {
-      throw new Error('스테이징 후 수정된 풀이를 다시 커밋에 추가해 주세요.');
-    }
-    await this.gitStatusService.commit(
-      vscode.Uri.parse(rootUri),
-      message,
-      submission.stagedFiles,
-      this.submissionSolutions(repository),
+    return this.trackedUsage(
+      'submission_action_finished',
+      'commit',
+      async ({ onResult, complete, setStage }) => {
+        this.requireTrustedWorkspace('풀이를 커밋하려면 먼저 워크스페이스를 신뢰해야 합니다.');
+        const repository = this.requireSubmissionRepository(rootUri);
+        const submission = repository.submission!;
+        if (!submission.activeSubmissionWeek || submission.stagedFiles.length === 0) {
+          throw new Error('커밋 준비 상태인 풀이가 없습니다.');
+        }
+        if (submission.stagedFiles.some(({ week }) => week !== submission.activeSubmissionWeek)) {
+          throw new Error('서로 다른 주차의 풀이를 한 커밋에 포함할 수 없습니다.');
+        }
+        const stagedUris = new Set(submission.stagedFiles.map(({ uri }) => uri));
+        const stagedOutdated = repository.problems
+          .flatMap(({ solutions }) => solutions)
+          .some(
+            ({ uri, submissionStatus }) =>
+              stagedUris.has(uri) && submissionStatus === 'staged-outdated',
+          );
+        if (stagedOutdated) {
+          throw new Error('스테이징 후 수정된 풀이를 다시 커밋에 추가해 주세요.');
+        }
+        setStage('execute');
+        await this.gitStatusService.commit(
+          vscode.Uri.parse(rootUri),
+          message,
+          submission.stagedFiles,
+          this.submissionSolutions(repository),
+          onResult,
+        );
+        complete();
+        setStage('refresh');
+        await this.refreshGitStatuses(true);
+      },
     );
-    await this.refreshGitStatuses(true);
   }
 
   /** 활성 저장소의 주차 브랜치를 push하고 Git·원격 상태를 다시 읽습니다. */
   async pushActiveWeek(rootUri: string): Promise<void> {
-    this.requireTrustedWorkspace('풀이를 push하려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const repository = this.requireSubmissionRepository(rootUri);
-    await this.gitStatusService.push(
-      vscode.Uri.parse(rootUri),
-      this.submissionSolutions(repository),
+    return this.trackedUsage(
+      'submission_action_finished',
+      'push',
+      async ({ onResult, complete, setStage }) => {
+        this.requireTrustedWorkspace('풀이를 push하려면 먼저 워크스페이스를 신뢰해야 합니다.');
+        const repository = this.requireSubmissionRepository(rootUri);
+        setStage('execute');
+        await this.gitStatusService.push(
+          vscode.Uri.parse(rootUri),
+          this.submissionSolutions(repository),
+          onResult,
+        );
+        complete();
+        setStage('refresh');
+        await this.refreshGitStatuses(true, true);
+      },
     );
-    await this.refreshGitStatuses(true, true);
   }
 
   /** 선택한 저장소의 제출 상태로 주차 PR 또는 생성 화면을 엽니다. */
   async openPullRequest(rootUri: string): Promise<void> {
-    const repository = this.requireSubmissionRepository(rootUri);
-    await this.gitStatusService.openPullRequest(
-      repository.submission!,
-      this.getSnapshot().nickname,
+    return this.trackedUsage(
+      'submission_action_finished',
+      'open_pr',
+      async ({ onResult, complete, setStage }) => {
+        const repository = this.requireSubmissionRepository(rootUri);
+        setStage('execute');
+        await this.gitStatusService.openPullRequest(
+          repository.submission!,
+          this.getSnapshot().nickname,
+          onResult,
+        );
+        complete();
+      },
     );
   }
 
   /** 신뢰·저장소·동기화 가능 여부를 확인해 포크를 동기화하고 성공하면 전체 상태를 갱신합니다. */
   async syncFork(rootUri: string): Promise<void> {
-    this.requireTrustedWorkspace('포크를 동기화하려면 먼저 워크스페이스를 신뢰해야 합니다.');
-    const repository = this.requireSubmissionRepository(rootUri);
-    if (!repository.submission?.canSync) {
-      throw new Error('현재 Git 변경을 정리한 뒤 포크를 동기화해 주세요.');
-    }
-    await this.gitStatusService.syncFork(
-      vscode.Uri.parse(rootUri),
-      this.submissionSolutions(repository),
+    return this.trackedUsage(
+      'fork_sync_finished',
+      undefined,
+      async ({ onResult, complete, setStage }) => {
+        this.requireTrustedWorkspace('포크를 동기화하려면 먼저 워크스페이스를 신뢰해야 합니다.');
+        const repository = this.requireSubmissionRepository(rootUri);
+        if (!repository.submission?.canSync) {
+          throw new Error('현재 Git 변경을 정리한 뒤 포크를 동기화해 주세요.');
+        }
+        setStage('execute');
+        await this.gitStatusService.syncFork(
+          vscode.Uri.parse(rootUri),
+          this.submissionSolutions(repository),
+          onResult,
+        );
+        complete();
+        setStage('refresh');
+        await this.refreshAll();
+        await this.refreshGitStatuses(true, true);
+      },
     );
-    await this.refreshAll();
-    await this.refreshGitStatuses(true, true);
   }
 
   /** 대상 변경 목록을 보여주고 확인받은 뒤 풀이 외 추적 변경을 되돌립니다. */
@@ -168,32 +243,66 @@ export class SubmissionCommands {
 
   /** 작업 보존 UI를 열고 결과·실패 모두 문제 목록과 Git 상태를 갱신합니다. */
   async prepareNextWeek(rootUri: string): Promise<void> {
-    this.requireTrustedWorkspace('다음 주차를 준비하려면 워크스페이스를 신뢰해 주세요.');
-    const repository = this.getSnapshot().repositories.find((item) => item.rootUri === rootUri);
-    if (!repository) throw new Error('현재 워크스페이스의 저장소가 아닙니다.');
-    try {
-      await this.gitStatusService.prepareNextWeek(
-        vscode.Uri.parse(rootUri),
-        this.submissionSolutions(repository),
-        { nickname: this.getSnapshot().nickname, problems: repository.problems },
-      );
-    } finally {
-      await this.refreshAll();
-      await this.refreshGitStatuses(true, true);
-    }
+    return this.trackedUsage(
+      'next_week_preparation_finished',
+      'prepare',
+      async ({ onResult, complete, setStage }) => {
+        this.requireTrustedWorkspace('다음 주차를 준비하려면 워크스페이스를 신뢰해 주세요.');
+        const repository = this.getSnapshot().repositories.find((item) => item.rootUri === rootUri);
+        if (!repository) throw new Error('현재 워크스페이스의 저장소가 아닙니다.');
+        let operationFailed = false;
+        try {
+          setStage('execute');
+          await this.gitStatusService.prepareNextWeek(
+            vscode.Uri.parse(rootUri),
+            this.submissionSolutions(repository),
+            { nickname: this.getSnapshot().nickname, problems: repository.problems },
+            onResult,
+          );
+          complete();
+        } catch (error) {
+          operationFailed = true;
+          throw error;
+        } finally {
+          setStage('refresh');
+          await this.refreshAll();
+          await this.refreshGitStatuses(true, true);
+          if (operationFailed) setStage('execute');
+        }
+      },
+    );
   }
 
   /** 실패 중인 작업도 저장소 신원과 복구 ID를 검증한 뒤 재개합니다. */
   async preparationAction(rootUri: string, id: string, action: PreparationAction): Promise<void> {
-    this.requireTrustedWorkspace('준비 작업을 복구하려면 워크스페이스를 신뢰해 주세요.');
-    if (!this.getSnapshot().repositories.some((repository) => repository.rootUri === rootUri))
-      throw new Error('현재 워크스페이스의 저장소가 아닙니다.');
-    try {
-      await this.gitStatusService.preparationAction(vscode.Uri.parse(rootUri), id, action);
-    } finally {
-      await this.refreshAll();
-      await this.refreshGitStatuses(true, true);
-    }
+    return this.trackedUsage(
+      'next_week_preparation_finished',
+      action === 'existingWeek' ? 'existing_week' : action,
+      async ({ onResult, complete, setStage }) => {
+        this.requireTrustedWorkspace('준비 작업을 복구하려면 워크스페이스를 신뢰해 주세요.');
+        if (!this.getSnapshot().repositories.some((repository) => repository.rootUri === rootUri))
+          throw new Error('현재 워크스페이스의 저장소가 아닙니다.');
+        let operationFailed = false;
+        try {
+          setStage('execute');
+          await this.gitStatusService.preparationAction(
+            vscode.Uri.parse(rootUri),
+            id,
+            action,
+            onResult,
+          );
+          complete();
+        } catch (error) {
+          operationFailed = true;
+          throw error;
+        } finally {
+          setStage('refresh');
+          await this.refreshAll();
+          await this.refreshGitStatuses(true, true);
+          if (operationFailed) setStage('execute');
+        }
+      },
+    );
   }
 
   /** 로컬 Git 상태와 원격 제출 정보를 모두 강제로 다시 읽습니다. */
@@ -208,6 +317,70 @@ export class SubmissionCommands {
       return;
     }
     await this.refreshGitStatuses(true, true);
+  }
+
+  /** 사용자 호출별 결과를 한 번만 저장하며 완료 뒤 갱신 실패를 별도로 표시합니다. */
+  private async trackedUsage(
+    event: UsageEventName,
+    action: UsageProperties['action'],
+    task: (context: {
+      onResult: GitOperationObserver;
+      /** 성공 반환만 제공하는 기존 대체 서비스의 완료를 확인합니다. */
+      complete(): void;
+      /** 오류가 발생한 실행·갱신 단계를 저장합니다. */
+      setStage(stage: NonNullable<UsageProperties['failure_stage']>): void;
+      /** 검증한 도메인 속성만 결과에 추가합니다. */
+      updateProperties(properties: UsageProperties): void;
+    }) => Promise<void>,
+  ): Promise<void> {
+    const operation = beginUsage(this.usage, event, action ? { action } : {});
+    const progress: { stage: NonNullable<UsageProperties['failure_stage']> } = {
+      stage: 'validation',
+    };
+    let result: GitOperationResult | undefined;
+    let properties: UsageProperties = {};
+    /** 중복 콜백이나 후처리 오류보다 먼저 도착한 본체 결과를 보관합니다. */
+    const onResult: GitOperationObserver = (receipt) => {
+      if (result) return;
+      result = receipt;
+      operation.markResult({
+        ...properties,
+        outcome: receipt.outcome,
+        study_week: receipt.studyWeek ?? properties.study_week,
+        source_week: receipt.sourceWeek,
+        target_week: receipt.targetWeek,
+        problem_count: receipt.problemCount,
+        phase: receipt.phase,
+        pr_target: receipt.prTarget,
+      });
+    };
+    try {
+      await task({
+        onResult,
+        complete: () => onResult({ outcome: 'completed' }),
+        setStage: (next) => {
+          progress.stage = next;
+        },
+        updateProperties: (next) => {
+          properties = { ...properties, ...next };
+        },
+      });
+      operation.finish();
+    } catch (error) {
+      const followupFailed =
+        result !== undefined &&
+        (progress.stage === 'refresh' ||
+          ['completed', 'cancelled', 'noop'].includes(result.outcome));
+      operation.finish({
+        ...properties,
+        outcome: 'error',
+        failure_stage:
+          followupFailed && progress.stage !== 'refresh' ? 'post_operation' : progress.stage,
+        followup_failed: followupFailed,
+        error_code: 'operation_failed',
+      });
+      throw error;
+    }
   }
 
   /** 저장소의 문제별 풀이를 주차·slug가 포함된 제출 대상 목록으로 펼칩니다. */

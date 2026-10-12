@@ -13,6 +13,13 @@ import { type GitRepositoryAdapter, relativeGitPath } from '../vscodeGit';
 import type { SubmissionSolution } from './submissionFiles';
 import { PreparationGit } from './preparationGit';
 import { PreparationWorkflow, type PreparationRecord } from './preparationWorkflow';
+import { weekFromBranch } from './submissionModel';
+import { getProblemWeek } from '../../../domain/study/studySchedule';
+import {
+  observeGitOperation,
+  type GitOperationObserver,
+  type GitOperationResult,
+} from './operationObservation';
 
 /** 삭제된 풀이도 주차에 연결하기 위한 카탈로그 범위입니다. */
 export interface PreparationScope {
@@ -118,139 +125,234 @@ export class PreparationService {
     root: vscode.Uri,
     solutions: readonly SubmissionSolution[],
     scope?: PreparationScope,
-  ): Promise<void> {
+    observer?: GitOperationObserver,
+  ): Promise<GitOperationResult> {
     if (!vscode.workspace.isTrusted) throw new Error('먼저 워크스페이스를 신뢰해 주세요.');
     const workflow = await this.workflow(root);
-    await workflow.exclusive(async () => {
-      if (!(await vscode.workspace.saveAll(false))) return;
-      const pr = await this.currentPullRequest(root);
-      if (!pr?.merged_at || !pr.head?.sha)
-        throw new Error('현재 주차 PR의 병합과 마지막 커밋을 확인한 뒤 다시 시도해 주세요.');
-      const repository = await this.adapter.requireRepository(root);
-      await repository.fetch({ remote: 'origin', prune: true });
-      const preview = await workflow.preview(pr.head.sha);
-      if (preview.branch !== pr.head.ref)
-        throw new Error('PR 조회 도중 현재 브랜치가 변경되었습니다. 다시 확인해 주세요.');
-      const byPath = new Map(
-        solutions.map((solution) => [
-          relativeGitPath(repository.rootUri, vscode.Uri.parse(solution.uri)),
-          solution,
-        ]),
-      );
-      /** 현재 파일이 없어도 카탈로그와 닉네임으로 삭제·이름 변경의 주차를 찾습니다. */
-      const weekFor = (file: string) =>
-        byPath.get(file)?.week ??
-        (scope &&
-        file.split('/').length === 2 &&
-        path.basename(file).split('.')[0]?.toLowerCase() === scope.nickname.toLowerCase()
-          ? scope.problems.find((problem) => problem.slug === file.split('/')[0])?.week
-          : undefined);
-      const weeks = [
-        ...new Set(preview.files.flatMap((file) => (weekFor(file) ? [weekFor(file)!] : []))),
-      ].filter((week) => `week-${String(week).padStart(2, '0')}` !== preview.branch);
-      let targetWeek: number | undefined;
-      let selected: string[] = [];
-      if (preview.files.length) {
-        const items = [
-          ...weeks.map((week) => ({
-            label: `Week ${String(week).padStart(2, '0')}로 풀이 이동`,
-            week,
-          })),
-          { label: '모두 보관하고 main으로 돌아가기', week: undefined },
-        ];
-        const target = await vscode.window.showQuickPick(items, {
-          title: '다음 주차 준비',
-          placeHolder: '이동할 풀이 주차를 선택하세요. 나머지 변경은 보관함에 남습니다.',
-        });
-        if (!target) return;
-        targetWeek = target.week;
-        if (targetWeek !== undefined) {
-          const candidates = preview.files.filter((file) => weekFor(file) === targetWeek);
-          const files = await vscode.window.showQuickPick(
-            candidates.map((file) => ({ label: file, picked: !preview.ambiguous })),
-            {
-              title: preview.ambiguous
-                ? '이력이 달라졌습니다. 가져올 파일을 직접 선택하세요'
-                : '이동할 풀이',
-              canPickMany: true,
-            },
-          );
-          if (!files) return;
-          selected = files.map((file) => file.label);
-        }
-      }
-      const detail = [
-        `현재 브랜치: ${preview.branch}`,
-        preview.ambiguous
-          ? '이력이 달라 추가 커밋 범위를 확정할 수 없습니다.'
-          : `병합 후 추가 커밋 ${preview.extraCommitCount}개${preview.extraCommits.length ? `\n${preview.extraCommits.join('\n')}` : ''}`,
-        preview.mainNeedsBackup
-          ? '기존 main을 백업하고 origin/main 기준으로 준비합니다.'
-          : 'main을 가져와 공식 저장소와 동기화합니다.',
-        preview.mainUpstream && preview.mainUpstream !== 'origin/main'
-          ? `main 추적 대상 변경: ${preview.mainUpstream} → origin/main`
-          : '',
-        `이동: ${selected.length ? selected.join(', ') : '없음'}`,
-        `보관: ${preview.files.filter((file) => !selected.includes(file)).join(', ') || '없음'}`,
-        '원본 커밋과 파일은 보관함에 남고, 이동한 풀이는 다시 커밋할 수 있습니다.',
-      ]
-        .filter(Boolean)
-        .join('\n');
-      let comparing = false;
-      while (true) {
-        const choice = await vscode.window.showInformationMessage(
-          '보존하고 다음 주차를 준비합니다.',
-          { modal: !comparing, detail },
-          '보존하고 다음 주차 준비',
-          '변경 비교',
+    let recordId: string | undefined;
+    return this.observed(
+      workflow,
+      () => recordId,
+      observer,
+      async (finish) => {
+        if (!(await vscode.workspace.saveAll(false))) return finish({ outcome: 'cancelled' });
+        const pr = await this.currentPullRequest(root);
+        if (!pr?.merged_at || !pr.head?.sha)
+          throw new Error('현재 주차 PR의 병합과 마지막 커밋을 확인한 뒤 다시 시도해 주세요.');
+        const repository = await this.adapter.requireRepository(root);
+        await repository.fetch({ remote: 'origin', prune: true });
+        const preview = await workflow.preview(pr.head.sha);
+        if (preview.branch !== pr.head.ref)
+          throw new Error('PR 조회 도중 현재 브랜치가 변경되었습니다. 다시 확인해 주세요.');
+        const byPath = new Map(
+          solutions.map((solution) => [
+            relativeGitPath(repository.rootUri, vscode.Uri.parse(solution.uri)),
+            solution,
+          ]),
         );
-        if (choice === '변경 비교') {
-          const file = await vscode.window.showQuickPick(preview.files, { title: '비교할 파일' });
-          if (file) await this.diff(workflow, preview.base, undefined, file);
-          comparing = true;
-          continue;
+        /** 현재 파일이 없어도 카탈로그와 닉네임으로 삭제·이름 변경의 주차를 찾습니다. */
+        const weekFor = (file: string) =>
+          byPath.get(file)?.week ??
+          (scope &&
+          file.split('/').length === 2 &&
+          path.basename(file).split('.')[0]?.toLowerCase() === scope.nickname.toLowerCase()
+            ? scope.problems.find((problem) => problem.slug === file.split('/')[0])?.week
+            : undefined);
+        const weeks = [
+          ...new Set(preview.files.flatMap((file) => (weekFor(file) ? [weekFor(file)!] : []))),
+        ].filter((week) => `week-${String(week).padStart(2, '0')}` !== preview.branch);
+        let targetWeek: number | undefined;
+        let selected: string[] = [];
+        if (preview.files.length) {
+          const items = [
+            ...weeks.map((week) => ({
+              label: `Week ${String(week).padStart(2, '0')}로 풀이 이동`,
+              week,
+            })),
+            { label: '모두 보관하고 main으로 돌아가기', week: undefined },
+          ];
+          const target = await vscode.window.showQuickPick(items, {
+            title: '다음 주차 준비',
+            placeHolder: '이동할 풀이 주차를 선택하세요. 나머지 변경은 보관함에 남습니다.',
+          });
+          if (!target)
+            return finish({ outcome: 'cancelled', sourceWeek: weekFromBranch(preview.branch) });
+          targetWeek = target.week;
+          if (targetWeek !== undefined) {
+            const candidates = preview.files.filter((file) => weekFor(file) === targetWeek);
+            const files = await vscode.window.showQuickPick(
+              candidates.map((file) => ({ label: file, picked: !preview.ambiguous })),
+              {
+                title: preview.ambiguous
+                  ? '이력이 달라졌습니다. 가져올 파일을 직접 선택하세요'
+                  : '이동할 풀이',
+                canPickMany: true,
+              },
+            );
+            if (!files)
+              return finish({
+                outcome: 'cancelled',
+                sourceWeek: weekFromBranch(preview.branch),
+                targetWeek,
+              });
+            selected = files.map((file) => file.label);
+          }
         }
-        if (choice !== '보존하고 다음 주차 준비') return;
-        break;
-      }
-      const live = await this.currentPullRequest(root);
-      if (live?.number !== pr.number || live.head?.sha !== pr.head.sha || !live.merged_at)
-        throw new Error('PR 상태가 바뀌었습니다. 다시 확인해 주세요.');
-      const record = await workflow.start(preview, selected, targetWeek);
-      await workflow.resume(record.id);
-    });
+        const detail = [
+          `현재 브랜치: ${preview.branch}`,
+          preview.ambiguous
+            ? '이력이 달라 추가 커밋 범위를 확정할 수 없습니다.'
+            : `병합 후 추가 커밋 ${preview.extraCommitCount}개${preview.extraCommits.length ? `\n${preview.extraCommits.join('\n')}` : ''}`,
+          preview.mainNeedsBackup
+            ? '기존 main을 백업하고 origin/main 기준으로 준비합니다.'
+            : 'main을 가져와 공식 저장소와 동기화합니다.',
+          preview.mainUpstream && preview.mainUpstream !== 'origin/main'
+            ? `main 추적 대상 변경: ${preview.mainUpstream} → origin/main`
+            : '',
+          `이동: ${selected.length ? selected.join(', ') : '없음'}`,
+          `보관: ${preview.files.filter((file) => !selected.includes(file)).join(', ') || '없음'}`,
+          '원본 커밋과 파일은 보관함에 남고, 이동한 풀이는 다시 커밋할 수 있습니다.',
+        ]
+          .filter(Boolean)
+          .join('\n');
+        let comparing = false;
+        while (true) {
+          const choice = await vscode.window.showInformationMessage(
+            '보존하고 다음 주차를 준비합니다.',
+            { modal: !comparing, detail },
+            '보존하고 다음 주차 준비',
+            '변경 비교',
+          );
+          if (choice === '변경 비교') {
+            const file = await vscode.window.showQuickPick(preview.files, { title: '비교할 파일' });
+            if (file) await this.diff(workflow, preview.base, undefined, file);
+            comparing = true;
+            continue;
+          }
+          if (choice !== '보존하고 다음 주차 준비')
+            return finish({
+              outcome: 'cancelled',
+              sourceWeek: weekFromBranch(preview.branch),
+              targetWeek,
+            });
+          break;
+        }
+        const live = await this.currentPullRequest(root);
+        if (live?.number !== pr.number || live.head?.sha !== pr.head.sha || !live.merged_at)
+          throw new Error('PR 상태가 바뀌었습니다. 다시 확인해 주세요.');
+        const record = await workflow.start(preview, selected, targetWeek);
+        recordId = record.id;
+        return finish(preparationResult(await workflow.resume(record.id), 'completed'));
+      },
+    );
   }
 
   /** 실행 중 파일 저장을 완료한 후 계속·취소·보관함 동작을 처리합니다. */
-  async action(root: vscode.Uri, id: string, action: PreparationAction): Promise<void> {
+  async action(
+    root: vscode.Uri,
+    id: string,
+    action: PreparationAction,
+    observer?: GitOperationObserver,
+  ): Promise<GitOperationResult> {
     if (!vscode.workspace.isTrusted) throw new Error('먼저 워크스페이스를 신뢰해 주세요.');
     if (!['continue', 'cancel', 'shelf', 'cleanup', 'conflicts', 'existingWeek'].includes(action))
       throw new Error('알 수 없는 준비 작업입니다.');
     const workflow = await this.workflow(root);
-    await workflow.exclusive(async () => {
-      if (!(await vscode.workspace.saveAll(false))) return;
-      const record = await workflow.read(id);
-      if (action === 'existingWeek') await workflow.openExistingTarget(id);
-      if (action === 'continue') await workflow.resume(id);
-      if (action === 'cancel') {
-        const choice = await vscode.window.showWarningMessage(
-          '현재 변경도 보관한 뒤 원본 브랜치와 스테이징 상태를 복원합니다. 이미 반영된 원격 main은 유지됩니다.',
-          { modal: true },
-          '원본 복원',
-        );
-        if (choice === '원본 복원') await workflow.cancel(id);
+    let observedRecordId = id;
+    return this.observed(
+      workflow,
+      () => observedRecordId,
+      observer,
+      async (finish) => {
+        if (!(await vscode.workspace.saveAll(false))) return finish({ outcome: 'cancelled' });
+        const record = await workflow.read(id);
+        switch (action) {
+          case 'existingWeek':
+            return finish(preparationResult(await workflow.openExistingTarget(id), 'completed'));
+          case 'continue':
+            if (record.phase === 'done' || record.phase === 'cancelled')
+              return finish(preparationResult(record, 'noop'));
+            return finish(preparationResult(await workflow.resume(id), 'completed'));
+          case 'cancel': {
+            const choice = await vscode.window.showWarningMessage(
+              '현재 변경도 보관한 뒤 원본 브랜치와 스테이징 상태를 복원합니다. 이미 반영된 원격 main은 유지됩니다.',
+              { modal: true },
+              '원본 복원',
+            );
+            if (choice !== '원본 복원') return finish(preparationResult(record, 'cancelled'));
+            const result = await workflow.cancel(id);
+            return finish(
+              preparationResult(result, record.phase === 'cancelled' ? 'noop' : 'completed'),
+            );
+          }
+          case 'shelf':
+            return finish(
+              await this.shelf(workflow, record, (selected) => {
+                observedRecordId = selected.id;
+              }),
+            );
+          case 'conflicts':
+            return finish(preparationResult(record, await this.resolve(workflow, record)));
+          case 'cleanup': {
+            const choice = await vscode.window.showWarningMessage(
+              '보관 파일·기존 main·복구 백업 참조를 정리합니다. 원본 주차 백업 브랜치와 stash는 유지됩니다.',
+              { modal: true },
+              '기록 정리',
+            );
+            if (choice !== '기록 정리') return finish(preparationResult(record, 'cancelled'));
+            await workflow.cleanup(id);
+            return finish(preparationResult(record, 'completed'));
+          }
+        }
+      },
+    );
+  }
+
+  /** 결과를 잠금 해제 전에 관찰하고, 복구 조회 실패가 원래 오류를 가리지 않게 합니다. */
+  private async observed(
+    workflow: PreparationWorkflow,
+    recordId: () => string | undefined,
+    observer: GitOperationObserver | undefined,
+    action: (
+      finish: (result: GitOperationResult) => GitOperationResult,
+    ) => Promise<GitOperationResult>,
+  ): Promise<GitOperationResult> {
+    let reported = false;
+    let entered = false;
+    /** 잠금 해제·갱신 이전의 결과를 한 번만 전달합니다. */
+    const finish = (result: GitOperationResult): GitOperationResult => {
+      if (!reported) {
+        reported = true;
+        observeGitOperation(observer, result);
       }
-      if (action === 'shelf') await this.shelf(workflow, record);
-      if (action === 'conflicts') await this.resolve(workflow, record);
-      if (action === 'cleanup') {
-        const choice = await vscode.window.showWarningMessage(
-          '보관 파일·기존 main·복구 백업 참조를 정리합니다. 원본 주차 백업 브랜치와 stash는 유지됩니다.',
-          { modal: true },
-          '기록 정리',
-        );
-        if (choice === '기록 정리') await workflow.cleanup(id);
+      return result;
+    };
+    try {
+      return await workflow.exclusive(() => {
+        entered = true;
+        return action(finish);
+      });
+    } catch (error) {
+      if (!reported) {
+        let result: GitOperationResult = { outcome: 'error' };
+        try {
+          const id = recordId();
+          if (entered && id) {
+            const record = await workflow.read(id);
+            result = preparationResult(
+              record,
+              record.phase === 'done' || record.phase === 'cancelled'
+                ? 'error'
+                : 'awaiting_recovery',
+            );
+          }
+        } catch {
+          // Diagnostic reads are optional; the original operation error remains authoritative.
+        }
+        finish(result);
       }
-    });
+      throw error;
+    }
   }
 
   /** Git blob을 임시 문서로 보여주어 바이너리와 삭제 파일도 비교합니다. */
@@ -290,7 +392,11 @@ export class PreparationService {
   }
 
   /** 모든 보관 기록과 main·중단 시점 백업을 파일 단위로 열고 복원할 수 있습니다. */
-  private async shelf(workflow: PreparationWorkflow, current: PreparationRecord): Promise<void> {
+  private async shelf(
+    workflow: PreparationWorkflow,
+    current: PreparationRecord,
+    onSelectedRecord: (record: PreparationRecord) => void,
+  ): Promise<GitOperationResult> {
     const records = await workflow.records();
     const choice = await vscode.window.showQuickPick(
       records.map((record) => ({
@@ -301,8 +407,9 @@ export class PreparationService {
       })),
       { title: '작업 보관함' },
     );
-    if (!choice) return;
+    if (!choice) return preparationResult(current, records.length ? 'cancelled' : 'noop');
     const record = choice.record;
+    onSelectedRecord(record);
     const versions = [
       { label: '원본 풀이와 파일', ref: record.snapshot, base: record.base },
       ...(record.originalMain
@@ -315,7 +422,7 @@ export class PreparationService {
       })),
     ];
     const version = await vscode.window.showQuickPick(versions, { title: '보관 시점' });
-    if (!version) return;
+    if (!version) return preparationResult(record, 'cancelled');
     const files = await workflow.git.paths([
       'diff',
       '--name-only',
@@ -326,11 +433,12 @@ export class PreparationService {
       '--',
     ]);
     const file = await vscode.window.showQuickPick(files, { title: '보관 파일' });
-    if (!file) return;
+    if (!file) return preparationResult(record, files.length ? 'cancelled' : 'noop');
     const action = await vscode.window.showQuickPick(
       ['변경 비교', '보관본 열기', '현재 브랜치에 복원'],
       { title: file },
     );
+    if (!action) return preparationResult(record, 'cancelled');
     if (action === '변경 비교') await this.diff(workflow, version.base, version.ref, file);
     if (action === '보관본 열기')
       await vscode.commands.executeCommand(
@@ -347,7 +455,7 @@ export class PreparationService {
         { modal: true },
         '복원',
       );
-      if (confirm !== '복원') return;
+      if (confirm !== '복원') return preparationResult(record, 'cancelled');
       const head = (await workflow.git.ref('HEAD'))!;
       const backup = await workflow.git.commitTree(await workflow.git.tree(), head);
       await workflow.git.run([
@@ -379,10 +487,14 @@ export class PreparationService {
         await fs.rm(full, { force: true });
       }
     }
+    return preparationResult(record, 'completed');
   }
 
   /** 텍스트는 편집기에서 수정하고 바이너리는 한쪽 내용을 선택한 뒤 해결 표시합니다. */
-  private async resolve(workflow: PreparationWorkflow, record: PreparationRecord): Promise<void> {
+  private async resolve(
+    workflow: PreparationWorkflow,
+    record: PreparationRecord,
+  ): Promise<'completed' | 'cancelled' | 'noop'> {
     const files = [
       ...new Set([
         ...(await workflow.conflicts()),
@@ -390,11 +502,12 @@ export class PreparationService {
       ]),
     ];
     const file = await vscode.window.showQuickPick(files, { title: '충돌·적용 결과 확인' });
-    if (!file) return;
+    if (!file) return files.length ? 'cancelled' : 'noop';
     const action = await vscode.window.showQuickPick(
       ['편집기에서 열기', '대상 브랜치 내용 사용', '가져오는 내용 사용', '수정 완료로 표시'],
       { title: file },
     );
+    if (!action) return 'cancelled';
     const full = await workflow.git.validatePath(file);
     if (action === '편집기에서 열기')
       await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(full));
@@ -420,5 +533,25 @@ export class PreparationService {
       await workflow.git.run(['add', '--', file]);
       await workflow.reviewed(record.id, file);
     }
+    return 'completed';
   }
+}
+
+/** 영속 기록에서 상태·주차·공식 문제 수만 추출하며 ref·파일·오류를 전달하지 않습니다. */
+function preparationResult(
+  record: PreparationRecord,
+  outcome: GitOperationResult['outcome'],
+): GitOperationResult {
+  return {
+    outcome,
+    phase: record.phase,
+    sourceWeek: weekFromBranch(record.sourceBranch),
+    targetWeek: record.targetWeek,
+    problemCount: new Set(
+      record.selected.flatMap((file) => {
+        const [slug, filename] = file.split('/');
+        return slug && filename && getProblemWeek(slug) ? [slug] : [];
+      }),
+    ).size,
+  };
 }

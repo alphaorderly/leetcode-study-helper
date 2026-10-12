@@ -315,6 +315,14 @@ export interface ExtensionSnapshot {
   issues: DetectionIssue[];
   workspaceTrusted: boolean;
   currentProblem?: CurrentProblemSnapshot;
+  telemetry?: TelemetrySettingsSnapshot;
+}
+
+/** 사용자 동의와 실행 환경을 반영한 사용 통계 설정의 표시 상태입니다. */
+export interface TelemetrySettingsSnapshot {
+  enabled: boolean;
+  effectiveEnabled: boolean;
+  disabledReason?: 'vscode' | 'development' | 'storage';
 }
 
 /** 줄 끝 보정에서 검사·수정·제외한 파일 수입니다. */
@@ -332,6 +340,7 @@ export interface LineLintFixResult {
 export type WebviewToExtensionMessage =
   | { type: 'ready' }
   | { type: 'saveSettings'; nickname: string; preferredLanguage: string }
+  | { type: 'setTelemetryEnabled'; enabled: boolean }
   | { type: 'openSolution'; uri: string }
   | { type: 'openOtherSolution'; rootUri: string; slug: string }
   | { type: 'openProblem'; slug: string }
@@ -357,6 +366,7 @@ export type WebviewToExtensionMessage =
 export type ExtensionToWebviewMessage =
   | { type: 'state'; state: ExtensionSnapshot }
   | { type: 'currentProblem'; currentProblem?: CurrentProblemSnapshot }
+  | { type: 'telemetryState'; state: TelemetrySettingsSnapshot }
   | { type: 'busy'; value: boolean };
 
 /** 다음 주차 준비에서 사용자가 실행할 수 있는 복구 작업입니다. */

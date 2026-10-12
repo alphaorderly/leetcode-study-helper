@@ -129,8 +129,24 @@ PR이 병합되면 **다음 주차 준비**로 다음 주차를 시작하고, �
 | `leetcodeStudyHelper.nickname` | 빈 값 | 제출 파일에서 찾을 닉네임입니다. 영문·숫자·하이픈을 사용할 수 있으며 대소문자를 구분합니다. |
 | `leetcodeStudyHelper.preferredLanguage` | `python3` | 새 풀이 파일을 만들 때 사용할 언어와 확장자입니다. |
 | `leetcodeStudyHelper.pythonExecutable` | `python3` | Python 테스트에 사용할 실행 파일 또는 절대 경로입니다. |
+| `leetcodeStudyHelper.telemetry.enabled` | `false` | 기능 사용 통계를 PostHog US에 전송할지 선택합니다. VS Code 사용 통계 설정도 허용되어야 합니다. |
 
 설정은 전역으로 저장되어 다른 LeetCode Study 워크스페이스에서도 동일하게 사용됩니다.
+
+## 사용 통계
+
+사용 통계 수집은 기본적으로 꺼져 있습니다. 배포된 확장에서 지원 저장소의 사이드바를 처음
+열면 한 번 안내하며, 설정 패널의 **사용 통계 수집 허용** 체크박스나
+`leetcodeStudyHelper.telemetry.enabled`에서 언제든 변경할 수 있습니다.
+수집 선택은 닉네임·언어 설정과 독립적으로 저장합니다.
+
+동의한 경우 무작위 설치 식별자, 확장·에디터 버전, 기능·문제·주차·언어와 실행 결과를
+PostHog US에 보냅니다. 닉네임, 코드, 파일 경로, 저장소 URL, 커밋·브랜치·PR 정보나
+원문 오류는 보내지 않습니다. VS Code 사용 통계를 끄면 대기 이벤트도 폐기하며,
+개발 실행과 자동 테스트에서는 실제 사용 통계를 전송하지 않습니다.
+
+이벤트·집계 기준과 개발자 운영 설정은 [사용 통계 문서](TELEMETRY.md), 전체 수집 속성은
+[telemetry.json](telemetry.json)에서 확인할 수 있습니다.
 
 ## 로컬 개발
 
@@ -155,6 +171,14 @@ yarn test
 ```
 
 통합 테스트는 `.tmp`에 격리된 멀티 루트 워크스페이스를 만든 뒤 `@vscode/test-electron`으로 실행합니다.
+
+PostHog 연결 확인은 `yarn telemetry:check`로 명시적으로 실행합니다.
+이 명령은 `environment: development`가 붙은 `telemetry_connection_test` 이벤트 하나를
+US 프로젝트에 전송합니다. 고정된 테스트 ID만 사용하며 사용자·풀이·저장소 정보는 보내지 않습니다.
+확장 활성화나 일반 검사에서는 실행하지 않습니다. 공용 HTTP 전송기를 사용하며,
+성공 출력은 서버의 요청 수락을 뜻합니다. 실제 수신은 PostHog 이벤트 화면에서 확인합니다.
+
+최소 지원 버전의 통합 테스트는 기본 검사 후 `node scripts/run-vscode-test.mjs --code-version 1.100.0`으로 실행합니다.
 
 ### 코드 편집 규칙
 

@@ -339,12 +339,13 @@ describe('GitStatusService syncRecovery', () => {
   it('routes the legacy main-return API through persistent preparation', async () => {
     const prepare = vi
       .spyOn(PreparationService.prototype, 'prepare')
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ outcome: 'completed' });
     const service = new GitStatusService();
     await service.returnToMainAndSync(uri('file:///study') as never);
     expect(prepare).toHaveBeenCalledWith(
       expect.objectContaining({ fsPath: '/study' }),
       [],
+      undefined,
       undefined,
     );
     prepare.mockRestore();

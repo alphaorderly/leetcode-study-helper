@@ -1,3 +1,4 @@
+import type { TelemetrySettingsSnapshot } from '../../shared/contracts';
 import { actionButton } from '../components/controls';
 import { element } from '../components/dom';
 import type { ViewContext } from '../state/viewTypes';
@@ -72,6 +73,66 @@ export function renderSettings({ state, ui, post }: ViewContext): HTMLElement {
       preferredLanguage: languageSelect.value,
     });
   });
-  panel.append(form);
+  panel.append(form, renderTelemetrySettings({ state, ui, post }));
   return panel;
+}
+
+/** 사용 통계 상태를 동의 여부와 실제 수집 가능 여부로 구분해 설명합니다. */
+function telemetryStatus(state: TelemetrySettingsSnapshot | undefined): string {
+  if (!state?.enabled) {
+    return '사용 통계를 수집하지 않습니다.';
+  }
+  if (state.effectiveEnabled) {
+    return '사용 통계 수집을 허용했습니다. 설정에서 언제든 끌 수 있습니다.';
+  }
+  switch (state.disabledReason) {
+    case 'vscode':
+      return 'VS Code 사용 통계 설정이 꺼져 있어 수집하지 않습니다.';
+    case 'development':
+      return '개발·테스트 실행에서는 사용 통계를 수집하지 않습니다.';
+    case 'storage':
+      return '설치 식별자를 저장하지 못해 이번 실행에서는 수집하지 않습니다.';
+    default:
+      return '현재 실행에서는 사용 통계를 수집하지 않습니다.';
+  }
+}
+
+/** 닉네임 검증·적용 버튼과 독립적인 사용 통계 동의 영역을 만듭니다. */
+function renderTelemetrySettings({ state, post }: ViewContext): HTMLElement {
+  const section = element('section', 'settings-card telemetry-settings');
+  section.setAttribute('aria-label', '사용 통계 설정');
+  const label = element('label', 'telemetry-label');
+  label.htmlFor = 'telemetry-enabled';
+  const checkbox = element('input', 'telemetry-checkbox');
+  checkbox.type = 'checkbox';
+  checkbox.id = 'telemetry-enabled';
+  checkbox.checked = state.telemetry?.enabled ?? false;
+  checkbox.setAttribute('aria-describedby', 'telemetry-description telemetry-status');
+  checkbox.addEventListener('change', () => {
+    post({ type: 'setTelemetryEnabled', enabled: checkbox.checked });
+  });
+  label.append(checkbox, element('span', undefined, '사용 통계 수집 허용'));
+  const description = element(
+    'p',
+    'telemetry-description',
+    '기능 개선을 위해 무작위 설치 식별자, 기능·문제·주차·언어와 실행 결과를 PostHog US에 보냅니다. 닉네임, 코드, 파일 경로와 저장소 주소는 보내지 않습니다.',
+  );
+  description.id = 'telemetry-description';
+  const status = element('p', 'telemetry-status', telemetryStatus(state.telemetry));
+  status.id = 'telemetry-status';
+  status.setAttribute('role', 'status');
+  section.append(label, description, status);
+  return section;
+}
+
+/** 사용 통계 부분 응답으로 체크박스와 설명만 갱신해 작성 중인 폼과 화면을 보존합니다. */
+export function updateTelemetrySettings(root: HTMLElement, state: TelemetrySettingsSnapshot): void {
+  const checkbox = root.querySelector<HTMLInputElement>('#telemetry-enabled');
+  if (checkbox) {
+    checkbox.checked = state.enabled;
+  }
+  const status = root.querySelector<HTMLElement>('#telemetry-status');
+  if (status) {
+    status.textContent = telemetryStatus(state);
+  }
 }

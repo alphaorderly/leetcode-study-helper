@@ -1,0 +1,434 @@
+{
+  "commonProperties": {
+    "distinct_id": {
+      "classification": "EndUserPseudonymizedInformation",
+      "purpose": "FeatureInsight",
+      "comment": "운영 이벤트는 동의 이후 저장한 무작위 설치 UUID이며 계정·닉네임·machine ID와 연결하지 않습니다. 수동 연결 확인은 고정 ID local-connection-test를 사용합니다."
+    },
+    "timestamp": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "이벤트의 UTC ISO 발생 시각. 본체 결과가 먼저 확인된 작업은 해당 결과 시각을 보존합니다."
+    },
+    "schema_version": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "고정된 이벤트 스키마 버전",
+      "isMeasurement": true
+    },
+    "extension_version": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "배포 확장 버전"
+    },
+    "editor_version": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "VS Code API가 제공하는 공개 에디터 버전"
+    },
+    "environment": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "운영 수집은 production, 수동 연결 확인은 development"
+    },
+    "$process_person_profile": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "사용자 프로필 생성 방지: false"
+    },
+    "$geoip_disable": {
+      "classification": "SystemMetaData",
+      "purpose": "FeatureInsight",
+      "comment": "위치 정보 확장 방지: true. IP 저장은 프로젝트에서 별도 비활성화합니다."
+    }
+  },
+  "events": {
+    "study_session_started": {
+      "comment": "동의한 첫 사이드바 세션. 활성 사용 집계에서 제외합니다.",
+      "properties": {
+        "setup_ready": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "유효한 닉네임·언어와 지원 저장소를 확인했는지"
+        },
+        "preferred_language": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "지원되는 기본 언어 설정 ID"
+        }
+      }
+    },
+    "setup_ready": {
+      "comment": "동의 이후 처음 관측한 준비 상태. 과거 설정 완료 시각은 아닙니다.",
+      "properties": {
+        "preferred_language": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "지원되는 기본 언어 설정 ID"
+        }
+      }
+    },
+    "solution_open_finished": {
+      "comment": "내 풀이를 실제 연 결과",
+      "properties": {
+        "outcome": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "이 이벤트에서 허용하는 고정 결과: completed/cancelled/noop/error"
+        },
+        "duration_ms": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 실행 소요 밀리초. 완료 후 화면 갱신 시간은 제외합니다.",
+          "isMeasurement": true
+        },
+        "followup_failed": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 결과 이후 에디터·조회·잠금 정리 실패 여부"
+        },
+        "failure_stage": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "고정된 validation/prepare/execute/editor/refresh/post_operation 단계"
+        },
+        "error_code": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "원문 오류 대신 제한된 오류 종류"
+        },
+        "problem_slug": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "공식 75문제 목록의 slug만 허용"
+        },
+        "study_week": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "공식 1~15주차. 문제 slug가 있으면 공식 매핑 사용",
+          "isMeasurement": true
+        },
+        "language": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "알려진 풀이 언어. 실제 .py 파일은 python3"
+        }
+      }
+    },
+    "solution_create_finished": {
+      "comment": "새 파일 생성과 기존 파일 열기 결과",
+      "properties": {
+        "outcome": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "이 이벤트에서 허용하는 고정 결과: completed/cancelled/noop/error"
+        },
+        "duration_ms": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 실행 소요 밀리초. 완료 후 화면 갱신 시간은 제외합니다.",
+          "isMeasurement": true
+        },
+        "followup_failed": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 결과 이후 에디터·조회·잠금 정리 실패 여부"
+        },
+        "failure_stage": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "고정된 validation/prepare/execute/editor/refresh/post_operation 단계"
+        },
+        "error_code": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "원문 오류 대신 제한된 오류 종류"
+        },
+        "problem_slug": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "공식 75문제 목록의 slug만 허용"
+        },
+        "study_week": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "공식 1~15주차. 문제 slug가 있으면 공식 매핑 사용",
+          "isMeasurement": true
+        },
+        "language": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "알려진 풀이 언어. 실제 .py 파일은 python3"
+        },
+        "create_result": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "새 파일 created 또는 기존 파일 exists. 이름·경로는 수집하지 않습니다."
+        }
+      }
+    },
+    "reference_open_finished": {
+      "comment": "참고 풀이·정답·문제 페이지를 연 결과",
+      "properties": {
+        "outcome": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "이 이벤트에서 허용하는 고정 결과: completed/cancelled/noop/error"
+        },
+        "duration_ms": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 실행 소요 밀리초. 완료 후 화면 갱신 시간은 제외합니다.",
+          "isMeasurement": true
+        },
+        "followup_failed": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 결과 이후 에디터·조회·잠금 정리 실패 여부"
+        },
+        "failure_stage": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "고정된 validation/prepare/execute/editor/refresh/post_operation 단계"
+        },
+        "error_code": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "원문 오류 대신 제한된 오류 종류"
+        },
+        "problem_slug": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "공식 75문제 목록의 slug만 허용"
+        },
+        "study_week": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "공식 1~15주차. 문제 slug가 있으면 공식 매핑 사용",
+          "isMeasurement": true
+        },
+        "language": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "알려진 풀이 언어. 실제 .py 파일은 python3"
+        },
+        "reference_kind": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "참고 종류: other_solution/answer/problem"
+        }
+      }
+    },
+    "test_finished": {
+      "comment": "명시적 Python 테스트의 최종 결과",
+      "properties": {
+        "outcome": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "이 이벤트에서 허용하는 고정 결과: passed/failed/error/cancelled"
+        },
+        "duration_ms": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 실행 소요 밀리초. 완료 후 화면 갱신 시간은 제외합니다.",
+          "isMeasurement": true
+        },
+        "followup_failed": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 결과 이후 에디터·조회·잠금 정리 실패 여부"
+        },
+        "failure_stage": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "고정된 validation/prepare/execute/editor/refresh/post_operation 단계"
+        },
+        "error_code": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "원문 오류 대신 제한된 오류 종류"
+        },
+        "problem_slug": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "공식 75문제 목록의 slug만 허용"
+        },
+        "study_week": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "공식 1~15주차. 문제 slug가 있으면 공식 매핑 사용",
+          "isMeasurement": true
+        },
+        "language": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "알려진 풀이 언어. 실제 .py 파일은 python3"
+        },
+        "passed": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "로컬 테스트 통과 개수",
+          "isMeasurement": true
+        },
+        "total": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "로컬 테스트 전체 개수",
+          "isMeasurement": true
+        }
+      }
+    },
+    "submission_action_finished": {
+      "comment": "stage/unstage/commit/push/open_pr 결과",
+      "properties": {
+        "outcome": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "이 이벤트에서 허용하는 고정 결과: completed/cancelled/noop/error"
+        },
+        "duration_ms": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 실행 소요 밀리초. 완료 후 화면 갱신 시간은 제외합니다.",
+          "isMeasurement": true
+        },
+        "followup_failed": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 결과 이후 에디터·조회·잠금 정리 실패 여부"
+        },
+        "failure_stage": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "고정된 validation/prepare/execute/editor/refresh/post_operation 단계"
+        },
+        "error_code": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "원문 오류 대신 제한된 오류 종류"
+        },
+        "action": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "사용자가 명시적으로 실행한 고정 작업 종류"
+        },
+        "problem_slug": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "stage/unstage 단일 풀이 작업에 한해 공식 75문제 목록의 slug만 허용"
+        },
+        "study_week": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "공식 1~15주차. 문제 slug가 있으면 공식 매핑 사용",
+          "isMeasurement": true
+        },
+        "problem_count": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "검증된 작업 범위에 포함된 고유 문제 수",
+          "isMeasurement": true
+        },
+        "pr_target": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "open_pr 작업의 existing PR 페이지 또는 creation_form. PR 생성·병합을 의미하지 않습니다."
+        }
+      }
+    },
+    "fork_sync_finished": {
+      "comment": "명시적 포크 동기화 결과",
+      "properties": {
+        "outcome": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "이 이벤트에서 허용하는 고정 결과: completed/cancelled/noop/error"
+        },
+        "duration_ms": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 실행 소요 밀리초. 완료 후 화면 갱신 시간은 제외합니다.",
+          "isMeasurement": true
+        },
+        "followup_failed": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 결과 이후 에디터·조회·잠금 정리 실패 여부"
+        },
+        "failure_stage": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "고정된 validation/prepare/execute/editor/refresh/post_operation 단계"
+        },
+        "error_code": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "원문 오류 대신 제한된 오류 종류"
+        }
+      }
+    },
+    "next_week_preparation_finished": {
+      "comment": "다음 주차 준비·복구 호출 결과",
+      "properties": {
+        "outcome": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "이 이벤트에서 허용하는 고정 결과: completed/cancelled/noop/error/awaiting_recovery"
+        },
+        "duration_ms": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 실행 소요 밀리초. 완료 후 화면 갱신 시간은 제외합니다.",
+          "isMeasurement": true
+        },
+        "followup_failed": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "본체 결과 이후 에디터·조회·잠금 정리 실패 여부"
+        },
+        "failure_stage": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "고정된 validation/prepare/execute/editor/refresh/post_operation 단계"
+        },
+        "error_code": {
+          "classification": "SystemMetaData",
+          "purpose": "PerformanceAndHealth",
+          "comment": "원문 오류 대신 제한된 오류 종류"
+        },
+        "action": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "사용자가 명시적으로 실행한 고정 작업 종류"
+        },
+        "phase": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "준비 기록의 고정 상태. cancelled는 성공적인 원본 복원일 수도 있습니다."
+        },
+        "source_week": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "준비 작업의 기존 공식 주차",
+          "isMeasurement": true
+        },
+        "target_week": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "준비 작업에서 선택한 공식 주차",
+          "isMeasurement": true
+        },
+        "problem_count": {
+          "classification": "SystemMetaData",
+          "purpose": "FeatureInsight",
+          "comment": "검증된 작업 범위에 포함된 고유 문제 수",
+          "isMeasurement": true
+        }
+      }
+    },
+    "telemetry_connection_test": {
+      "comment": "수동 연결 확인 명령에서만 전송하는 development 이벤트",
+      "properties": {}
+    }
+  }
+}

@@ -135,6 +135,7 @@ describe('StudyController submission wiring', () => {
             week: 1,
           },
         ],
+        expect.any(Function),
       );
       expect(mocks.refreshGit).toHaveBeenCalledExactlyOnceWith(true, undefined);
       mocks.repositories = [];

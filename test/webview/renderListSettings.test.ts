@@ -426,6 +426,56 @@ describe('webview listSettings', () => {
     expect(post).toHaveBeenCalledTimes(10);
   });
 
+  it('keeps telemetry disabled by default and outside nickname validation', () => {
+    const post = vi.fn();
+    renderApp(root, snapshot, ui, post);
+    const nickname = root.querySelector<HTMLInputElement>('#nickname')!;
+    const checkbox = root.querySelector<HTMLInputElement>('#telemetry-enabled')!;
+
+    expect(checkbox.checked).toBe(false);
+    expect(checkbox.closest('form')).toBeNull();
+    expect(checkbox.getAttribute('aria-describedby')).toBe(
+      'telemetry-description telemetry-status',
+    );
+    expect(root.querySelector('#telemetry-description')?.textContent).toContain('PostHog US');
+    expect(root.querySelector('#telemetry-status')?.textContent).toContain('수집하지 않습니다');
+    nickname.value = '';
+    expect(nickname.checkValidity()).toBe(false);
+
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event('change'));
+
+    expect(post.mock.calls).toEqual([
+      [{ type: 'setTelemetryEnabled', enabled: true }],
+      [{ type: 'setTelemetryEnabled', enabled: false }],
+    ]);
+    expect(nickname.value).toBe('');
+  });
+
+  it('allows withdrawing consent during a busy operation or VS Code opt-out', () => {
+    const post = vi.fn();
+    ui.busy = true;
+    renderApp(
+      root,
+      {
+        ...snapshot,
+        telemetry: { enabled: true, effectiveEnabled: false, disabledReason: 'vscode' },
+      },
+      ui,
+      post,
+    );
+    const checkbox = root.querySelector<HTMLInputElement>('#telemetry-enabled')!;
+
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.disabled).toBe(false);
+    expect(root.querySelector('#telemetry-status')?.textContent).toContain('VS Code');
+    checkbox.click();
+
+    expect(post).toHaveBeenCalledWith({ type: 'setTelemetryEnabled', enabled: false });
+  });
+
   it('filters by status and search text', () => {
     ui.filter = 'incomplete';
     ui.query = 'three-sum';

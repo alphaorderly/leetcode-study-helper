@@ -355,9 +355,9 @@ export class PreparationWorkflow {
   }
 
   /** 단계 전후 기록을 확인하며 push 실패나 충돌에서 이어서 실행합니다. */
-  async resume(id: string): Promise<void> {
+  async resume(id: string): Promise<PreparationRecord> {
     const record = await this.read(id);
-    if (terminalPhases.has(record.phase)) return;
+    if (terminalPhases.has(record.phase)) return record;
     try {
       record.error = undefined;
       if ((await this.git.text(['remote', 'get-url', 'origin'])) !== record.originUrl)
@@ -391,6 +391,7 @@ export class PreparationWorkflow {
       await this.save(record);
       throw error;
     }
+    return record;
   }
 
   /** 파일별 적용 진행을 기록하여 한 파일 실패가 다른 파일의 완료로 가려지지 않게 합니다. */
@@ -560,7 +561,7 @@ export class PreparationWorkflow {
   }
 
   /** 기존 주차를 덮어쓰지 않고 열며 이동하지 않은 초안은 보관함에 남깁니다. */
-  async openExistingTarget(id: string): Promise<void> {
+  async openExistingTarget(id: string): Promise<PreparationRecord> {
     const record = await this.read(id);
     if (record.phase !== 'target' || !record.targetWeek)
       throw new Error('기존 주차를 열 수 있는 단계가 아닙니다.');
@@ -577,6 +578,7 @@ export class PreparationWorkflow {
     record.error =
       '기존 주차 작업을 열었습니다. 이동할 풀이는 보관함에서 비교하고 복원할 수 있습니다.';
     await this.save(record);
+    return record;
   }
 
   /** 충돌 파일은 Git의 NUL 구분 목록을 사용합니다. */
@@ -585,9 +587,9 @@ export class PreparationWorkflow {
   }
 
   /** 취소 전에 현재 내용과 원본 index를 별도 보존하여 해결 중 편집도 잃지 않습니다. */
-  async cancel(id: string): Promise<void> {
+  async cancel(id: string): Promise<PreparationRecord> {
     const record = await this.read(id);
-    if (record.phase === 'cancelled') return;
+    if (record.phase === 'cancelled') return record;
     if ((await this.git.ref(`refs/heads/${record.sourceBranch}`)) !== record.sourceHead)
       throw new Error('원본 브랜치가 변경되었습니다. 보관함에서 비교해 주세요.');
     if (record.phase === 'preserve') {
@@ -598,7 +600,7 @@ export class PreparationWorkflow {
       if (!record.stash) {
         record.phase = 'cancelled';
         await this.save(record);
-        return;
+        return record;
       }
     }
     const mergeHead = await this.git.ref('MERGE_HEAD');
@@ -650,6 +652,7 @@ export class PreparationWorkflow {
     record.phase = 'cancelled';
     record.error = undefined;
     await this.save(record);
+    return record;
   }
 
   /** UI에는 ref 대신 복구 가능한 단계와 파일 목록을 전달합니다. */

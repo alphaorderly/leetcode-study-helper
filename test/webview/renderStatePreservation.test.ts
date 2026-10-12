@@ -104,6 +104,64 @@ describe('webview statePreservation', () => {
     expect(graph.scrollTop).toBe(120);
   });
 
+  it('preserves nickname, language, focus and list content on telemetry patches', () => {
+    const renderer = new WebviewRenderer(root, ui, vi.fn());
+    renderer.updateState(snapshot);
+    const panel = root.querySelector<HTMLDetailsElement>('.settings-panel')!;
+    const nickname = root.querySelector<HTMLInputElement>('#nickname')!;
+    const language = root.querySelector<HTMLSelectElement>('#preferred-language')!;
+    const checkbox = root.querySelector<HTMLInputElement>('#telemetry-enabled')!;
+    const card = root.querySelector('.problem-card');
+    panel.open = true;
+    nickname.value = 'unfinished-name';
+    language.value = 'typescript';
+    nickname.focus();
+    nickname.setSelectionRange(1, 4);
+    root.scrollTop = 95;
+
+    renderer.updateTelemetryState({ enabled: true, effectiveEnabled: true });
+
+    expect(root.querySelector('#nickname')).toBe(nickname);
+    expect(root.querySelector('#preferred-language')).toBe(language);
+    expect(root.querySelector('#telemetry-enabled')).toBe(checkbox);
+    expect(root.querySelector('.problem-card')).toBe(card);
+    expect(nickname.value).toBe('unfinished-name');
+    expect(language.value).toBe('typescript');
+    expect(document.activeElement).toBe(nickname);
+    expect([nickname.selectionStart, nickname.selectionEnd]).toEqual([1, 4]);
+    expect(panel.open).toBe(true);
+    expect(root.scrollTop).toBe(95);
+    expect(checkbox.checked).toBe(true);
+    expect(root.querySelector('#telemetry-status')?.textContent).toContain('허용했습니다');
+  });
+
+  it('preserves commit input and graph scroll when telemetry changes or saving fails', () => {
+    ui.viewMode = 'submission';
+    const renderer = new WebviewRenderer(root, ui, vi.fn());
+    renderer.updateState(submissionSnapshot());
+    const input = root.querySelector<HTMLInputElement>('.submission-commit-input')!;
+    const graph = root.querySelector<HTMLElement>('.submission-graph')!;
+    input.value = '작성 중인 메시지';
+    input.focus();
+    input.setSelectionRange(2, 5);
+    graph.scrollTop = 120;
+
+    renderer.updateTelemetryState({
+      enabled: true,
+      effectiveEnabled: false,
+      disabledReason: 'storage',
+    });
+    renderer.updateTelemetryState({ enabled: false, effectiveEnabled: false });
+
+    expect(root.querySelector('.submission-commit-input')).toBe(input);
+    expect(root.querySelector('.submission-graph')).toBe(graph);
+    expect(input.value).toBe('작성 중인 메시지');
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([2, 5]);
+    expect(graph.scrollTop).toBe(120);
+    expect(root.querySelector<HTMLInputElement>('#telemetry-enabled')?.checked).toBe(false);
+  });
+
   it('reuses the edited commit message after busy and full-state updates', () => {
     ui.viewMode = 'submission';
     const post = vi.fn();

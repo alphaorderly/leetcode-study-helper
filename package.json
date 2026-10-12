@@ -158,6 +158,16 @@
           "default": "python3",
           "scope": "window",
           "description": "Python 풀이 테스트에 사용할 실행 파일 또는 절대 경로입니다."
+        },
+        "leetcodeStudyHelper.telemetry.enabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "tags": [
+            "telemetry",
+            "usesOnlineServices"
+          ],
+          "description": "확장 개선을 위해 무작위 설치 식별자와 기능·문제·주차·언어·실행 결과를 PostHog(US)에 전송합니다. VS Code 사용 통계가 허용된 배포 환경에서만 수집하며 닉네임·코드·파일 경로는 보내지 않습니다."
         }
       }
     }
@@ -170,6 +180,7 @@
     "lint": "eslint .",
     "docs:check": "node scripts/check-jsdoc.mjs",
     "typecheck": "tsc --noEmit",
+    "telemetry:check": "node scripts/check-posthog-connection.mjs",
     "test:unit": "vitest run test/unit test/webview",
     "test:compile:integration": "tsc -p tsconfig.integration.json",
     "test:prepare:integration": "node scripts/prepare-integration-fixture.mjs",

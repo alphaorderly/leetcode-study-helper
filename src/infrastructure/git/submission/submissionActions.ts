@@ -21,6 +21,8 @@ import {
   type GitRepositoryAdapter,
 } from '../vscodeGit';
 
+import { observeGitOperation, type GitOperationObserver } from './operationObservation';
+
 export type { SubmissionSolution } from './submissionFiles';
 
 /**
@@ -50,6 +52,7 @@ export class SubmissionActions {
     uri: vscode.Uri,
     week: number | undefined,
     solutions: readonly SubmissionSolution[],
+    observer?: GitOperationObserver,
   ): Promise<void> {
     if (!week) {
       throw new Error('주차가 지정된 풀이만 제출할 수 있습니다.');
@@ -83,13 +86,19 @@ export class SubmissionActions {
       throw new Error('풀이 파일을 저장하지 못해 커밋에 추가하지 않았습니다.');
     }
     await repository.add([uri.fsPath]);
+    observeGitOperation(observer, { outcome: 'completed', studyWeek: week, problemCount: 1 });
     await repository.status();
   }
 
   /** 풀이의 스테이징을 해제하고 상태를 다시 읽습니다. */
-  async unstageSolution(repositoryRoot: vscode.Uri, uri: vscode.Uri): Promise<void> {
+  async unstageSolution(
+    repositoryRoot: vscode.Uri,
+    uri: vscode.Uri,
+    observer?: GitOperationObserver,
+  ): Promise<void> {
     const repository = await this.repositoryAdapter.requireRepository(repositoryRoot);
     await repository.revert([uri.fsPath]);
+    observeGitOperation(observer, { outcome: 'completed', problemCount: 1 });
     await repository.status();
   }
 
@@ -102,6 +111,7 @@ export class SubmissionActions {
     message: string,
     expectedFiles: readonly SubmissionFileSnapshot[],
     solutions: readonly SubmissionSolution[],
+    observer?: GitOperationObserver,
   ): Promise<void> {
     const repository = await this.guards.requireSubmissionMutation(repositoryRoot, false);
     /** 네트워크 조회와 브랜치 전환 전에 확인한 대상입니다. 마지막 검증에서 URL이 달라지지 않았는지 비교합니다. */
@@ -169,6 +179,11 @@ export class SubmissionActions {
       requireUserConfig: true,
       postCommitCommand: null,
     });
+    observeGitOperation(observer, {
+      outcome: 'completed',
+      studyWeek: week,
+      problemCount: new Set(expectedFiles.map(({ slug }) => slug)).size,
+    });
     await repository.status();
   }
 
@@ -176,7 +191,11 @@ export class SubmissionActions {
    * 주차 브랜치의 커밋 경로와 원격 상태를 검증한 뒤 일반 push를 수행합니다.
    * 네트워크 조회 뒤 쓰기 직전 검증을 반복하므로 검증 호출을 합치면 안 됩니다.
    */
-  async push(repositoryRoot: vscode.Uri, solutions: readonly SubmissionSolution[]): Promise<void> {
+  async push(
+    repositoryRoot: vscode.Uri,
+    solutions: readonly SubmissionSolution[],
+    observer?: GitOperationObserver,
+  ): Promise<void> {
     const repository = await this.guards.requireSubmissionMutation(repositoryRoot, true);
     const verifiedOrigin = this.guards.requireOrigin(repository);
     const submissionBranch = repository.state.HEAD?.name;
@@ -194,7 +213,7 @@ export class SubmissionActions {
     const fileByPath = submissionFilesByPath(repository, solutions);
     /** 이미 원격 주차 브랜치가 있으면 그 이후 커밋만 검사합니다. 첫 push는 공식 main 이후 전체 주차 이력을 검사합니다. */
     const baseRef = remoteBranch ? `origin/${submissionBranch}` : canonicalMain;
-    const pendingWeek = await this.requirePendingPushWeek(
+    const { week: pendingWeek, problemCount } = await this.requirePendingPushWeek(
       repository,
       baseRef,
       submissionBranch,
@@ -227,6 +246,7 @@ export class SubmissionActions {
       submissionBranch,
       !remoteBranch || !repository.state.HEAD?.upstream,
     );
+    observeGitOperation(observer, { outcome: 'completed', studyWeek: pendingWeek, problemCount });
     await repository.status();
     this.githubClient.clearSubmissionCache();
   }
@@ -316,7 +336,7 @@ export class SubmissionActions {
 
   /**
    * 최초 push는 공식 main, 이후 push는 origin 주차 브랜치를 기준으로 커밋을 검사합니다.
-   * 빈 이력·merge·조회 한도·풀이 외 파일을 먼저 거부한 후 단일 주차를 반환합니다.
+   * 빈 이력·merge·조회 한도·풀이 외 파일을 거부한 뒤 단일 주차와 중복 없는 문제 수를 반환합니다.
    */
   private async requirePendingPushWeek(
     repository: GitRepository,
@@ -324,7 +344,7 @@ export class SubmissionActions {
     submissionBranch: string,
     branchWeek: number,
     fileByPath: ReadonlyMap<string, SubmissionSolution>,
-  ): Promise<number> {
+  ): Promise<{ week: number; problemCount: number }> {
     const rangeBase = await this.guards.requireMergeBase(repository, baseRef, 'HEAD');
     const pendingCommits = await repository.log({
       range: `${rangeBase}..HEAD`,
@@ -338,6 +358,7 @@ export class SubmissionActions {
       throw new Error('미푸시 커밋이 너무 많아 안전하게 제출 범위를 확인할 수 없습니다.');
     }
     const pendingWeeks = new Set<number>();
+    const problemSlugs = new Set<string>();
     for (const commit of pendingCommits) {
       const paths = await this.guards.readSubmissionCommitPaths(repository, commit);
       for (const relativePath of paths) {
@@ -346,6 +367,7 @@ export class SubmissionActions {
           throw new Error(`풀이 외 파일이 포함된 커밋은 자동 push할 수 없습니다: ${relativePath}`);
         }
         pendingWeeks.add(solution.week);
+        problemSlugs.add(solution.slug);
       }
     }
     if (pendingWeeks.size !== 1) {
@@ -355,7 +377,7 @@ export class SubmissionActions {
     if (pendingWeek !== branchWeek) {
       throw new Error(`${submissionBranch}에는 Week ${branchWeek} 풀이만 push할 수 있습니다.`);
     }
-    return pendingWeek;
+    return { week: pendingWeek, problemCount: problemSlugs.size };
   }
 
   /** GitHub 조회 직후 PR과 원격 파일의 주차를 확인합니다. 실제 Git ref 검증은 뒤에서 별도로 수행합니다. */
@@ -437,6 +459,7 @@ export class SubmissionActions {
   async syncFork(
     repositoryRoot: vscode.Uri,
     solutions: readonly SubmissionSolution[],
+    observer?: GitOperationObserver,
   ): Promise<void> {
     const repository = await this.guards.requireSubmissionMutation(repositoryRoot, true);
     if (repository.state.HEAD?.name !== 'main') {
@@ -445,7 +468,11 @@ export class SubmissionActions {
     if (this.guards.hasBlockingDirtyState(repository, solutions)) {
       throw new Error('스테이징 또는 풀이 외 추적 파일 변경을 먼저 정리해 주세요.');
     }
-    await this.branches.performForkSync(repository, this.guards.requireOrigin(repository));
+    await this.branches.performForkSync(
+      repository,
+      this.guards.requireOrigin(repository),
+      observer,
+    );
   }
 
   /** 사용자가 확인한 풀이 외 추적 파일 목록이 현재 목록과 같을 때만 변경을 되돌립니다. */
@@ -485,11 +512,20 @@ export class SubmissionActions {
   }
 
   /** 기존 PR을 열거나 주차별 제목·본문이 채워진 GitHub PR 작성 화면을 엽니다. PR을 직접 생성하지 않습니다. */
-  async openPullRequest(submission: RepositorySubmissionSnapshot, nickname: string): Promise<void> {
+  async openPullRequest(
+    submission: RepositorySubmissionSnapshot,
+    nickname: string,
+    observer?: GitOperationObserver,
+  ): Promise<void> {
     if (submission.pullRequest) {
       if (!(await vscode.env.openExternal(vscode.Uri.parse(submission.pullRequest.url)))) {
         throw new Error('GitHub PR 페이지를 열지 못했습니다.');
       }
+      observeGitOperation(observer, {
+        outcome: 'completed',
+        prTarget: 'existing',
+        studyWeek: submission.pullRequest.week,
+      });
       return;
     }
     if (submission.pendingCommits.some(({ pushed }) => !pushed)) {
@@ -516,6 +552,12 @@ export class SubmissionActions {
     const url = buildPullRequestCompareUrl(owner, submission.submissionBranch, title, body);
     try {
       await vscode.commands.executeCommand('vscode.open', url);
+      observeGitOperation(observer, {
+        outcome: 'completed',
+        prTarget: 'creation_form',
+        studyWeek: submission.activeSubmissionWeek,
+        problemCount: slugs.length,
+      });
     } catch {
       throw new Error('GitHub PR 작성 화면을 열지 못했습니다.');
     }

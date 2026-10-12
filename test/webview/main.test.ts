@@ -83,4 +83,34 @@ describe('webview state rendering', () => {
     expect(postMessage).toHaveBeenCalledWith({ type: 'ready' });
     expect(setState).toHaveBeenCalled();
   });
+
+  it('applies telemetry messages without replacing input or content', async () => {
+    vi.stubGlobal('acquireVsCodeApi', () => ({
+      postMessage: vi.fn(),
+      getState: () => undefined,
+      setState: vi.fn(),
+    }));
+    await import('../../src/webview/main.js');
+    window.dispatchEvent(
+      new MessageEvent('message', { data: { type: 'state', state: baseSnapshot } }),
+    );
+    const nickname = document.querySelector<HTMLInputElement>('#nickname')!;
+    const problemCard = document.querySelector('.problem-card');
+    nickname.value = 'edited-name';
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'telemetryState',
+          state: { enabled: true, effectiveEnabled: false, disabledReason: 'development' },
+        },
+      }),
+    );
+
+    expect(document.querySelector('#nickname')).toBe(nickname);
+    expect(nickname.value).toBe('edited-name');
+    expect(document.querySelector('.problem-card')).toBe(problemCard);
+    expect(document.querySelector<HTMLInputElement>('#telemetry-enabled')?.checked).toBe(true);
+    expect(document.querySelector('#telemetry-status')?.textContent).toContain('개발·테스트');
+  });
 });

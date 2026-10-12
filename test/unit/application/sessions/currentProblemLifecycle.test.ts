@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RepositorySnapshot } from '../../../../src/shared/contracts';
+import type { UsageRecorder } from '../../../../src/shared/telemetry';
 import type {
   PythonInspection,
   PythonRunResult,
@@ -75,13 +76,28 @@ async function setup() {
   });
   const run = vi.fn<(...args: unknown[]) => Promise<PythonRunResult>>().mockResolvedValue(passed);
   const getProblem = vi.fn(async () => data);
+  const operations: Array<{
+    markResult: ReturnType<typeof vi.fn>;
+    finish: ReturnType<typeof vi.fn>;
+  }> = [];
+  const usage = {
+    begin: vi.fn<UsageRecorder['begin']>(() => {
+      const operation = { markResult: vi.fn(), finish: vi.fn() };
+      operations.push(operation);
+      return operation;
+    }),
+  };
   const { CurrentProblemSession } =
     await import('../../../../src/application/sessions/currentProblemSession.js');
-  const session = new CurrentProblemSession({} as never, {
-    leetCodeApiService: { getProblem: vi.fn() },
-    testDataService: { getProblem },
-    pythonRunnerService: { inspect, run, dispose: vi.fn() },
-  });
+  const session = new CurrentProblemSession(
+    {} as never,
+    {
+      leetCodeApiService: { getProblem: vi.fn() },
+      testDataService: { getProblem },
+      pythonRunnerService: { inspect, run, dispose: vi.fn() },
+    },
+    usage,
+  );
   const repositories: RepositorySnapshot[] = [
     {
       rootUri: 'file:///study',
@@ -89,6 +105,7 @@ async function setup() {
       problems: [
         {
           slug: 'sample',
+          week: 1,
           difficulty: 'Easy',
           categories: [],
           blindCategories: [],
@@ -110,6 +127,8 @@ async function setup() {
     run,
     inspect,
     getProblem,
+    usage,
+    operations,
     switchFile: () => editor.fire({ document: { uri: uri('B') } }),
     edit: () => edits.fire({ document: { uri: uri('A') } }),
   };
@@ -141,11 +160,16 @@ describe('CurrentProblemSession result ownership', () => {
   });
 
   it('rejects preparation errors but publishes execution errors with candidates', async () => {
-    const { session, getProblem, run } = await setup();
+    const { session, getProblem, run, operations } = await setup();
     getProblem.mockRejectedValueOnce(new Error('dataset unavailable'));
     await expect(session.run(candidate.id)).rejects.toThrow('dataset unavailable');
     expect(session.currentSnapshot?.runner.status).toBe('ready');
     expect(run).not.toHaveBeenCalled();
+    expect(operations[0]?.finish).toHaveBeenCalledExactlyOnceWith({
+      outcome: 'error',
+      error_code: 'operation_failed',
+      failure_stage: 'prepare',
+    });
     run.mockRejectedValueOnce(new Error('process failed'));
     await session.run(candidate.id);
     expect(session.currentSnapshot?.runner).toMatchObject({
@@ -153,11 +177,16 @@ describe('CurrentProblemSession result ownership', () => {
       message: 'process failed',
       candidates: [candidate],
     });
+    expect(operations[1]?.finish).toHaveBeenCalledExactlyOnceWith({
+      outcome: 'error',
+      error_code: 'runner',
+      failure_stage: 'execute',
+    });
     session.dispose();
   });
 
   it('ignores a completed run after switching files', async () => {
-    const { session, run, switchFile } = await setup();
+    const { session, run, switchFile, operations } = await setup();
     const pending = deferred<PythonRunResult>();
     run.mockReturnValueOnce(pending.promise);
     const running = session.run(candidate.id);
@@ -169,11 +198,13 @@ describe('CurrentProblemSession result ownership', () => {
     await running;
     expect(session.currentSnapshot?.solution.name).toBe('B.py');
     expect(session.currentSnapshot?.runner.status).toBe('checking');
+    expect(operations[0]?.markResult).not.toHaveBeenCalled();
+    expect(operations[0]?.finish).toHaveBeenCalledExactlyOnceWith({ outcome: 'cancelled' });
     session.dispose();
   });
 
   it('does not release the new run controller when an older run finishes', async () => {
-    const { session, run, edit } = await setup();
+    const { session, run, edit, operations } = await setup();
     const old = deferred<PythonRunResult>();
     const next = deferred<PythonRunResult>();
     run.mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise);
@@ -190,11 +221,15 @@ describe('CurrentProblemSession result ownership', () => {
     next.resolve(passed);
     await second;
     expect(session.currentSnapshot?.runner.status).toBe('checking');
+    expect(operations).toHaveLength(2);
+    for (const operation of operations) {
+      expect(operation.finish).toHaveBeenCalledExactlyOnceWith({ outcome: 'cancelled' });
+    }
     session.dispose();
   });
 
   it('does not start Python when a file changes while test data is loading', async () => {
-    const { session, getProblem, run, switchFile } = await setup();
+    const { session, getProblem, run, switchFile, operations } = await setup();
     const pending = deferred<typeof data>();
     getProblem.mockReturnValueOnce(pending.promise);
     const running = session.run(candidate.id);
@@ -202,6 +237,81 @@ describe('CurrentProblemSession result ownership', () => {
     pending.resolve(data);
     await running;
     expect(run).not.toHaveBeenCalled();
+    expect(operations[0]?.finish).toHaveBeenCalledExactlyOnceWith({ outcome: 'cancelled' });
+    session.dispose();
+  });
+
+  it('records only explicit runs and separates a failed assertion from execution failure', async () => {
+    const { session, run, usage, operations } = await setup();
+    expect(usage.begin).not.toHaveBeenCalled();
+    run.mockResolvedValueOnce({
+      ok: true,
+      outcome: 'failed',
+      passed: 1,
+      total: 3,
+      durationMs: 7,
+      assertion: 'private source and test inputs',
+      stdout: 'private stdout',
+      stderr: 'private stderr',
+    });
+    await session.run(candidate.id);
+    expect(usage.begin).toHaveBeenCalledExactlyOnceWith('test_finished', {
+      problem_slug: 'sample',
+      study_week: 1,
+      language: 'python3',
+    });
+    expect(operations[0]?.markResult).toHaveBeenCalledExactlyOnceWith({
+      outcome: 'failed',
+      passed: 1,
+      total: 3,
+    });
+    expect(operations[0]?.finish).toHaveBeenCalledExactlyOnceWith({
+      outcome: 'failed',
+      passed: 1,
+      total: 3,
+    });
+    session.dispose();
+  });
+
+  it.each([
+    ['syntax', 'syntax'],
+    ['missingObjects', 'missing_objects'],
+    ['candidate', 'candidate'],
+    ['execution', 'execution'],
+    ['unrecognized-private-detail', 'runner'],
+  ])('maps the %s protocol failure to a finite error code', async (kind, code) => {
+    const { session, run, operations } = await setup();
+    run.mockResolvedValueOnce({
+      ok: false,
+      kind,
+      message: 'private diagnostic',
+      traceback: 'private traceback',
+      stdout: 'private output',
+      stderr: 'private error output',
+    });
+    await session.run(candidate.id);
+    expect(operations[0]?.markResult).toHaveBeenCalledExactlyOnceWith({
+      outcome: 'error',
+      error_code: code,
+      failure_stage: 'execute',
+    });
+    expect(operations[0]?.finish).toHaveBeenCalledExactlyOnceWith({
+      outcome: 'error',
+      error_code: code,
+      failure_stage: 'execute',
+    });
+    session.dispose();
+  });
+
+  it('records rejected candidate validation without invoking Python', async () => {
+    const { session, run, operations } = await setup();
+    await expect(session.run('not-a-candidate')).rejects.toThrow('풀이 후보');
+    expect(run).not.toHaveBeenCalled();
+    expect(operations[0]?.finish).toHaveBeenCalledExactlyOnceWith({
+      outcome: 'error',
+      error_code: 'operation_failed',
+      failure_stage: 'validation',
+    });
     session.dispose();
   });
 });

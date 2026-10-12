@@ -1,10 +1,14 @@
-import type { CurrentProblemSnapshot, ExtensionSnapshot } from '../shared/contracts';
+import type {
+  CurrentProblemSnapshot,
+  ExtensionSnapshot,
+  TelemetrySettingsSnapshot,
+} from '../shared/contracts';
 import { element } from './components/dom';
 import { hasRepositories, listChromeHidden } from './state/shellModel';
 import type { PostMessage, UiState, ViewContext } from './state/viewTypes';
 import { CurrentProblemViewRenderer } from './views/currentProblemView';
 import { renderProblemList } from './views/problemListView';
-import { renderSettings } from './views/settingsView';
+import { renderSettings, updateTelemetrySettings } from './views/settingsView';
 import { renderControls, renderIssues, renderNotices, renderViewTabs } from './views/shellView';
 import { renderSubmissionView } from './views/submissionView';
 
@@ -85,6 +89,15 @@ export class WebviewRenderer {
     } else if (this.ui.viewMode === 'list' && !currentProblem) {
       this.renderList();
     }
+  }
+
+  /** 동의 설정만 변경하고 닉네임·언어·커밋 입력 및 화면 위치를 그대로 보존합니다. */
+  updateTelemetryState(telemetry: TelemetrySettingsSnapshot): void {
+    if (!this.state) {
+      return;
+    }
+    this.state = { ...this.state, telemetry };
+    updateTelemetrySettings(this.settingsRegion, telemetry);
   }
 
   /** 작업 중 상태가 달라졌을 때 관련 컨트롤과 현재 화면을 다시 렌더링합니다. */

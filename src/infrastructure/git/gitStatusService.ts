@@ -13,6 +13,7 @@ import { summaryForStatuses } from './submission/submissionModel';
 import { SubmissionStatusReader } from './submission/submissionStatusReader';
 import { GitRepositoryAdapter, addChangeUris } from './vscodeGit';
 import { PreparationService, type PreparationScope } from './submission/preparationService';
+import type { GitOperationObserver } from './submission/operationObservation';
 
 export type { SubmissionSolution } from './submission/submissionActions';
 
@@ -178,9 +179,10 @@ export class GitStatusService implements vscode.Disposable {
     root: vscode.Uri,
     solutions: readonly SubmissionSolution[],
     scope?: PreparationScope,
+    observer?: GitOperationObserver,
   ): Promise<void> {
     try {
-      await this.preparation.prepare(root, solutions, scope);
+      await this.preparation.prepare(root, solutions, scope, observer);
     } finally {
       this.githubClient.clearSubmissionCache();
       this.changeEmitter.fire();
@@ -188,9 +190,14 @@ export class GitStatusService implements vscode.Disposable {
   }
 
   /** 영속 준비 작업의 재개·취소·보관함 명령을 실행합니다. */
-  async preparationAction(root: vscode.Uri, id: string, action: PreparationAction): Promise<void> {
+  async preparationAction(
+    root: vscode.Uri,
+    id: string,
+    action: PreparationAction,
+    observer?: GitOperationObserver,
+  ): Promise<void> {
     try {
-      await this.preparation.action(root, id, action);
+      await this.preparation.action(root, id, action, observer);
     } finally {
       this.githubClient.clearSubmissionCache();
       this.changeEmitter.fire();
@@ -203,16 +210,21 @@ export class GitStatusService implements vscode.Disposable {
     uri: vscode.Uri,
     week: number | undefined,
     solutions: readonly SubmissionSolution[],
+    observer?: GitOperationObserver,
   ): Promise<void> {
     return this.preparation.mutation(repositoryRoot, () =>
-      this.submissionActions.stageSolution(repositoryRoot, uri, week, solutions),
+      this.submissionActions.stageSolution(repositoryRoot, uri, week, solutions, observer),
     );
   }
 
   /** 제출 작업기에 풀이 스테이징 해제를 위임합니다. */
-  async unstageSolution(repositoryRoot: vscode.Uri, uri: vscode.Uri): Promise<void> {
+  async unstageSolution(
+    repositoryRoot: vscode.Uri,
+    uri: vscode.Uri,
+    observer?: GitOperationObserver,
+  ): Promise<void> {
     return this.preparation.mutation(repositoryRoot, () =>
-      this.submissionActions.unstageSolution(repositoryRoot, uri),
+      this.submissionActions.unstageSolution(repositoryRoot, uri, observer),
     );
   }
 
@@ -222,16 +234,21 @@ export class GitStatusService implements vscode.Disposable {
     message: string,
     expectedFiles: readonly SubmissionFileSnapshot[],
     solutions: readonly SubmissionSolution[],
+    observer?: GitOperationObserver,
   ): Promise<void> {
     return this.preparation.mutation(repositoryRoot, () =>
-      this.submissionActions.commit(repositoryRoot, message, expectedFiles, solutions),
+      this.submissionActions.commit(repositoryRoot, message, expectedFiles, solutions, observer),
     );
   }
 
   /** 제출 작업기에 주차 브랜치의 검증과 push를 위임합니다. */
-  async push(repositoryRoot: vscode.Uri, solutions: readonly SubmissionSolution[]): Promise<void> {
+  async push(
+    repositoryRoot: vscode.Uri,
+    solutions: readonly SubmissionSolution[],
+    observer?: GitOperationObserver,
+  ): Promise<void> {
     return this.preparation.mutation(repositoryRoot, () =>
-      this.submissionActions.push(repositoryRoot, solutions),
+      this.submissionActions.push(repositoryRoot, solutions, observer),
     );
   }
 
@@ -239,9 +256,10 @@ export class GitStatusService implements vscode.Disposable {
   async syncFork(
     repositoryRoot: vscode.Uri,
     solutions: readonly SubmissionSolution[] = [],
+    observer?: GitOperationObserver,
   ): Promise<void> {
     return this.preparation.mutation(repositoryRoot, () =>
-      this.submissionActions.syncFork(repositoryRoot, solutions),
+      this.submissionActions.syncFork(repositoryRoot, solutions, observer),
     );
   }
 
@@ -269,8 +287,12 @@ export class GitStatusService implements vscode.Disposable {
   }
 
   /** 제출 작업기에 주차 PR 또는 생성 화면 열기를 위임합니다. */
-  async openPullRequest(submission: RepositorySubmissionSnapshot, nickname: string): Promise<void> {
-    return this.submissionActions.openPullRequest(submission, nickname);
+  async openPullRequest(
+    submission: RepositorySubmissionSnapshot,
+    nickname: string,
+    observer?: GitOperationObserver,
+  ): Promise<void> {
+    return this.submissionActions.openPullRequest(submission, nickname, observer);
   }
 
   /** GitHub 로그인을 요청하고 성공하면 이전 인증으로 만든 원격 캐시를 비웁니다. */

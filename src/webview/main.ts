@@ -63,6 +63,12 @@ window.addEventListener('message', (event: MessageEvent<ExtensionToWebviewMessag
     case 'busy':
       renderer?.updateBusy(event.data.value);
       break;
+    case 'telemetryState':
+      if (state) {
+        state = { ...state, telemetry: event.data.state };
+      }
+      renderer?.updateTelemetryState(event.data.state);
+      break;
   }
   vscode.setState(ui);
   requestProblemIfNeeded();

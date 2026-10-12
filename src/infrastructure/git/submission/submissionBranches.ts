@@ -9,6 +9,8 @@ import { type SubmissionSolution } from './submissionFiles';
 import type { SubmissionGuards } from './submissionGuards';
 import { type GitRepository, relativeChangePaths } from '../vscodeGit';
 
+import { observeGitOperation, type GitOperationObserver } from './operationObservation';
+
 /**
  * 제출 명령이 필요로 하는 공식 main 동기화와 주차 브랜치 전환을 담당합니다.
  * require로 시작하는 일부 메서드도 fetch·remote 추가·병합·push를 수행하므로
@@ -37,6 +39,7 @@ export class SubmissionBranches {
   async performForkSync(
     repository: GitRepository,
     verifiedOrigin: ParsedGitHubRemote = this.guards.requireOrigin(repository),
+    observer?: GitOperationObserver,
   ): Promise<string> {
     await repository.fetch({ remote: 'origin', ref: 'main', prune: true });
     await repository.status();
@@ -90,6 +93,7 @@ export class SubmissionBranches {
     }
     try {
       await repository.push('origin', 'main', false);
+      observeGitOperation(observer, { outcome: 'completed' });
     } catch (error) {
       await repository.status();
       /** push 실패 시 병합 완료된 로컬 main을 되돌리지 않습니다. 남아 있는 상태를 읽어 재시도 안내를 구성합니다. */
