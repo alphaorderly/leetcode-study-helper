@@ -20,6 +20,8 @@ export type { SubmissionSolution } from './submission/submissionActions';
 /** 풀이별 Git·제출 상태, PR 번호와 저장소 제출 스냅샷을 함께 반환하는 조회 결과입니다. */
 export interface SolutionGitStatusResult {
   remoteName?: string;
+  /** 루트가 Git 저장소인지입니다. 확정할 수 없으면 undefined이고 false는 저장소가 아님을 뜻합니다. */
+  hasGit?: boolean;
   statuses: ReadonlyMap<string, SolutionGitStatus>;
   submissionStatuses?: ReadonlyMap<string, SolutionSubmissionStatus>;
   pullRequestNumbers?: ReadonlyMap<string, number>;
@@ -67,7 +69,8 @@ export class GitStatusService implements vscode.Disposable {
 
     const repository = await this.repositoryAdapter.getRepository(repositoryRoot);
     if (!repository) {
-      return { statuses };
+      const settled = await this.repositoryAdapter.isDiscoveryComplete();
+      return { statuses, hasGit: settled ? false : undefined };
     }
 
     try {
@@ -103,6 +106,7 @@ export class GitStatusService implements vscode.Disposable {
       await this.enrichPreparation(repositoryRoot, submissionResult.snapshot, forceRemote);
       return {
         remoteName: upstream?.remote,
+        hasGit: true,
         statuses,
         submissionStatuses: submissionResult?.statuses,
         pullRequestNumbers: submissionResult?.pullRequestNumbers,
@@ -113,6 +117,7 @@ export class GitStatusService implements vscode.Disposable {
         submissionSolutions.map(({ uri }) => [uri, 'unknown' as SolutionSubmissionStatus]),
       );
       const result: SolutionGitStatusResult = {
+        hasGit: true,
         statuses,
         submissionStatuses,
         pullRequestNumbers: new Map(),

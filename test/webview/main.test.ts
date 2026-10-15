@@ -33,6 +33,7 @@ const baseSnapshot: ExtensionSnapshot = {
     },
   ],
   issues: [],
+  workspace: { kind: 'study', nestedStudyFolders: [] },
   workspaceTrusted: true,
 };
 

@@ -100,6 +100,7 @@ describe('StudyController answer navigation', () => {
             },
           ],
           issues: [],
+          workspace: { kind: 'study', nestedStudyFolders: [] },
         }));
       },
     }));

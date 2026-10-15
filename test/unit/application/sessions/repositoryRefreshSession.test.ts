@@ -74,7 +74,11 @@ async function setup() {
       }),
     },
   }));
-  const scan = vi.fn(async () => ({ repositories: [repository], issues: [] }));
+  const scan = vi.fn(async () => ({
+    repositories: [repository],
+    issues: [],
+    workspace: { kind: 'study' as const, nestedStudyFolders: [] },
+  }));
   const refreshProblem = vi.fn(async (value: RepositorySnapshot) => value);
   const getStatuses = vi.fn<GitStatusService['getStatuses']>().mockResolvedValue(gitResult);
   const { RepositoryRefreshSession } =
@@ -142,6 +146,7 @@ describe('RepositoryRefreshSession coordination', () => {
     scan.mockResolvedValueOnce({
       repositories: [{ ...repository, name: 'rescanned' }],
       issues: [],
+      workspace: { kind: 'study', nestedStudyFolders: [] },
     });
     await session.refresh('User');
     const complete = session.refreshGitStatuses(false, true);

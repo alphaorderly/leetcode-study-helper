@@ -113,6 +113,8 @@ export interface GitRepository {
 /** Git 저장소 목록과 열림·닫힘·확장 상태 이벤트를 제공하는 API입니다. */
 interface GitApi {
   readonly git?: { readonly path: string };
+  /** Git 확장이 워크스페이스의 저장소 탐색을 마쳤는지 나타냅니다. 값이 없는 구현은 완료로 간주합니다. */
+  readonly state?: 'uninitialized' | 'initialized';
   readonly repositories: GitRepository[];
   readonly onDidChangeState: vscode.Event<unknown>;
   readonly onDidOpenRepository: vscode.Event<GitRepository>;
@@ -259,6 +261,15 @@ export class GitRepositoryAdapter implements vscode.Disposable {
       return repository;
     }
     return api.repositories.find(({ rootUri }) => uriContains(rootUri, repositoryRoot));
+  }
+
+  /**
+   * 저장소를 못 찾은 결과를 확정해도 되는지 알려줍니다. Git 확장이 아직 저장소를 탐색 중이면
+   * 곧 찾을 수 있으므로 false입니다. 확장이 꺼져 있거나 사용할 수 없으면 더 기다릴 이유가 없어 true입니다.
+   */
+  async isDiscoveryComplete(): Promise<boolean> {
+    const api = await this.getApi();
+    return !api || api.state === undefined || api.state === 'initialized';
   }
 
   /** 지정 루트의 저장소를 반환하며 찾지 못하면 오류를 던집니다. */

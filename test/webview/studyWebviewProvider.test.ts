@@ -39,6 +39,7 @@ async function createProvider(withTelemetry = true) {
     currentSnapshot: snapshot,
     getState: vi.fn(async () => snapshot),
     saveSettings: vi.fn(async () => {}),
+    handleOnboardingAction: vi.fn(async () => {}),
     onDidChange: changes.event,
     onDidChangeCurrentProblem: currentChanges.event,
   };
@@ -190,6 +191,56 @@ describe('StudyWebviewProvider telemetry settings', () => {
 
     await vi.waitFor(() => expect(harness.postMessage).toHaveBeenCalledTimes(1));
     expect(harness.showErrorMessage).not.toHaveBeenCalled();
+    harness.provider.dispose();
+  });
+});
+
+describe('StudyWebviewProvider onboarding messages', () => {
+  it('forwards known actions with an optional string target inside a busy window', async () => {
+    const harness = await createProvider(false);
+    harness.send({ type: 'onboarding', action: 'openNestedFolder', target: 'file:///dev/x' });
+    harness.send({ type: 'onboarding', action: 'recheck' });
+
+    await vi.waitFor(() => {
+      expect(harness.controller.handleOnboardingAction).toHaveBeenCalledTimes(2);
+    });
+    expect(harness.controller.handleOnboardingAction).toHaveBeenNthCalledWith(
+      1,
+      'openNestedFolder',
+      'file:///dev/x',
+    );
+    expect(harness.controller.handleOnboardingAction).toHaveBeenNthCalledWith(
+      2,
+      'recheck',
+      undefined,
+    );
+    expect(harness.postMessage).toHaveBeenCalledWith({ type: 'busy', value: true });
+    expect(harness.postMessage).toHaveBeenCalledWith({ type: 'busy', value: false });
+    harness.provider.dispose();
+  });
+
+  it('drops unknown actions and non-string targets', async () => {
+    const harness = await createProvider(false);
+    for (const message of [
+      { type: 'onboarding' },
+      { type: 'onboarding', action: 'formatDisk' },
+      { type: 'onboarding', action: 42 },
+      { type: 'onboarding', action: 'openNestedFolder', target: { uri: 'file:///x' } },
+      { type: 'onboarding', action: 'openNestedFolder', target: 1 },
+      { type: 'onboarding', action: 'toString' },
+    ]) {
+      harness.send(message);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(harness.controller.handleOnboardingAction).not.toHaveBeenCalled();
+    harness.provider.dispose();
+  });
+
+  it('shows controller failures as VS Code errors', async () => {
+    const harness = await createProvider(false);
+    harness.controller.handleOnboardingAction.mockRejectedValueOnce(new Error('클론 실패'));
+    harness.send({ type: 'onboarding', action: 'cloneRepository' });
+    await vi.waitFor(() => expect(harness.showErrorMessage).toHaveBeenCalledWith('클론 실패'));
     harness.provider.dispose();
   });
 });

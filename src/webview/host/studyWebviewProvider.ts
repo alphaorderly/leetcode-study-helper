@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type {
   ExtensionSnapshot,
   ExtensionToWebviewMessage,
+  OnboardingAction,
   TelemetrySettingsSnapshot,
   WebviewToExtensionMessage,
 } from '../../shared/contracts';
@@ -30,6 +31,14 @@ function nonce(): string {
   ).join('');
 }
 
+const ONBOARDING_ACTIONS: Record<OnboardingAction, true> = {
+  openFolder: true,
+  cloneRepository: true,
+  openForkPage: true,
+  openNestedFolder: true,
+  recheck: true,
+};
+
 const WEBVIEW_MESSAGE_TYPES: Record<WebviewToExtensionMessage['type'], true> = {
   ready: true,
   saveSettings: true,
@@ -54,9 +63,20 @@ const WEBVIEW_MESSAGE_TYPES: Record<WebviewToExtensionMessage['type'], true> = {
   preparationAction: true,
   refreshSubmission: true,
   signInGitHub: true,
+  onboarding: true,
 };
 
-/** 알려진 메시지 종류를 확인하고 사용 통계 설정은 boolean 값만 허용합니다. */
+/** 온보딩 동작이 알려진 종류인지, target이 있으면 문자열인지 확인합니다. */
+function isOnboardingMessage(value: object): boolean {
+  const { action, target } = value as { action?: unknown; target?: unknown };
+  return (
+    typeof action === 'string' &&
+    Object.hasOwn(ONBOARDING_ACTIONS, action) &&
+    (target === undefined || typeof target === 'string')
+  );
+}
+
+/** 알려진 메시지 종류를 확인하고 사용 통계 설정은 boolean 값만, 온보딩은 알려진 동작만 허용합니다. */
 function isWebviewMessage(value: unknown): value is WebviewToExtensionMessage {
   if (typeof value !== 'object' || value === null || !('type' in value)) {
     return false;
@@ -65,7 +85,9 @@ function isWebviewMessage(value: unknown): value is WebviewToExtensionMessage {
   return (
     typeof type === 'string' &&
     Object.hasOwn(WEBVIEW_MESSAGE_TYPES, type) &&
-    (type !== 'setTelemetryEnabled' || ('enabled' in value && typeof value.enabled === 'boolean'))
+    (type !== 'setTelemetryEnabled' ||
+      ('enabled' in value && typeof value.enabled === 'boolean')) &&
+    (type !== 'onboarding' || isOnboardingMessage(value))
   );
 }
 
@@ -240,6 +262,11 @@ export class StudyWebviewProvider implements vscode.WebviewViewProvider, vscode.
           break;
         case 'signInGitHub':
           await this.withBusy(() => this.controller.signInGitHub());
+          break;
+        case 'onboarding':
+          await this.withBusy(() =>
+            this.controller.handleOnboardingAction(message.action, message.target),
+          );
           break;
       }
     } catch (error) {

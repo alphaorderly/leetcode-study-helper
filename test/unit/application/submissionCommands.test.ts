@@ -37,6 +37,7 @@ async function createCommands(submission: RepositorySubmissionSnapshot, usage?: 
     preferredLanguage: 'python3',
     languages: [],
     issues: [],
+    workspace: { kind: 'study', nestedStudyFolders: [] },
     workspaceTrusted: true,
     repositories: [
       {

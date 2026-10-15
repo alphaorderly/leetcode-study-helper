@@ -34,7 +34,11 @@ vi.mock('../../../src/infrastructure/git/gitStatusService', () => ({
 vi.mock('../../../src/application/sessions/repositoryRefreshSession', () => ({
   RepositoryRefreshSession: class {
     onDidChange = () => ({ dispose() {} });
-    refresh = async () => ({ repositories: mocks.repositories, issues: [] });
+    refresh = async () => ({
+      repositories: mocks.repositories,
+      issues: [],
+      workspace: { kind: 'study', nestedStudyFolders: [] },
+    });
     refreshGitStatuses = mocks.refreshGit;
     dispose() {}
   },

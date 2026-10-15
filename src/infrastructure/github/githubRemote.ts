@@ -1,8 +1,11 @@
+import {
+  CANONICAL_FULL_NAME,
+  CANONICAL_OWNER,
+  CANONICAL_REPOSITORY,
+} from '../../shared/canonicalRepository';
 import type { GitRemote } from '../git/vscodeGit';
 
-export const CANONICAL_OWNER = 'DaleStudy';
-export const CANONICAL_REPOSITORY = 'leetcode-study';
-export const CANONICAL_FULL_NAME = `${CANONICAL_OWNER}/${CANONICAL_REPOSITORY}`;
+export { CANONICAL_FULL_NAME, CANONICAL_OWNER, CANONICAL_REPOSITORY };
 export const CANONICAL_REMOTE_URL = `https://github.com/${CANONICAL_FULL_NAME}.git`;
 
 /** GitHub remote URL에서 추출한 소유자·저장소 이름과 원래 URL입니다. */

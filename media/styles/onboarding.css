@@ -1,0 +1,147 @@
+.onboarding-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--ui-border);
+  border-radius: 2px;
+  background: var(--ui-surface);
+}
+
+.onboarding-quiet {
+  border-style: dashed;
+  border-color: var(--ui-border-strong);
+  background: transparent;
+}
+
+.onboarding-warning {
+  border-color: var(--vscode-editorWarning-foreground, var(--ui-border-strong));
+}
+
+.onboarding-broken {
+  border-color: var(--vscode-errorForeground, var(--ui-border-strong));
+}
+
+.onboarding-title {
+  margin: 0;
+  font-size: 1.05em;
+  font-weight: 600;
+}
+
+.onboarding-text,
+.onboarding-hint,
+.onboarding-reason {
+  margin: 0;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.onboarding-reason {
+  font-size: 0.92em;
+  opacity: 0.85;
+}
+
+.onboarding-summary {
+  padding: 2px 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.onboarding-details[open] > .onboarding-summary {
+  margin-bottom: 8px;
+}
+
+.onboarding-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-start .onboarding-steps {
+  counter-reset: onboarding-step;
+}
+
+.onboarding-start .onboarding-step {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.onboarding-start .onboarding-step-label::before {
+  margin-right: 6px;
+  color: var(--vscode-descriptionForeground);
+  counter-increment: onboarding-step;
+  content: counter(onboarding-step) '.';
+}
+
+.onboarding-checklist .onboarding-step {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.onboarding-marker {
+  display: inline-flex;
+  justify-content: center;
+  width: 18px;
+  color: var(--vscode-descriptionForeground);
+  font-weight: 700;
+}
+
+.onboarding-step[data-status='done'] .onboarding-marker {
+  color: var(--vscode-testing-iconPassed, var(--vscode-foreground));
+}
+
+.onboarding-step[data-status='current'] .onboarding-marker {
+  color: var(--vscode-focusBorder, var(--vscode-foreground));
+}
+
+.onboarding-step[data-status='warning'] .onboarding-marker {
+  color: var(--vscode-editorWarning-foreground, var(--vscode-foreground));
+}
+
+.onboarding-step[data-status='done'] .onboarding-step-label {
+  color: var(--vscode-descriptionForeground);
+}
+
+.onboarding-step-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.onboarding-step-label {
+  font-weight: 600;
+}
+
+.onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.onboarding-actions-column {
+  flex-direction: column;
+}
+
+.onboarding-actions button {
+  padding: 4px 10px;
+}
+
+.onboarding-command {
+  display: block;
+  padding: 5px 7px;
+  border: 1px solid var(--ui-border);
+  border-radius: 2px;
+  background: var(--ui-surface-muted);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.92em;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  user-select: all;
+}

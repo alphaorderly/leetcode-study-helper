@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 
 const mockState = vi.hoisted(() => ({
   repository: undefined as Record<string, unknown> | undefined,
+  gitApiState: undefined as 'uninitialized' | 'initialized' | undefined,
   textDocuments: [] as Array<{
     uri: { toString(): string };
     isDirty: boolean;
@@ -75,6 +76,9 @@ vi.mock('vscode', () => ({
       exports: {
         enabled: true,
         getAPI: () => ({
+          get state() {
+            return mockState.gitApiState;
+          },
           repositories: mockState.repository ? [mockState.repository] : [],
           getRepository: () => mockState.repository,
           onDidChangeState: () => ({ dispose(): void {} }),

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { ExtensionSnapshot } from '../../src/shared/contracts';
 import {
   currentProblemTabModel,
+  hasRepositories,
   listChromeHidden,
-  shellNotices,
 } from '../../src/webview/state/shellModel';
 import type { UiState } from '../../src/webview/state/viewTypes';
 
@@ -23,17 +23,21 @@ function snapshot(overrides: Partial<ExtensionSnapshot> = {}): ExtensionSnapshot
     languages: [{ id: 'python3', label: 'Python 3', extension: 'py' }],
     repositories: [],
     issues: [],
+    workspace: { kind: 'none', nestedStudyFolders: [] },
     workspaceTrusted: true,
     ...overrides,
   };
 }
 
 describe('shellModel', () => {
-  it('asks for nickname and a supported workspace when both are missing', () => {
-    const notices = shellNotices(snapshot({ nickname: '' }));
-    expect(notices).toHaveLength(2);
-    expect(notices[0]).toContain('닉네임');
-    expect(notices[1]).toContain('problem-categories.json');
+  it('reports whether any supported repository is open', () => {
+    expect(hasRepositories(undefined)).toBe(false);
+    expect(hasRepositories(snapshot())).toBe(false);
+    expect(
+      hasRepositories(
+        snapshot({ repositories: [{ name: 'a', rootUri: 'file:///a', problems: [] }] }),
+      ),
+    ).toBe(true);
   });
 
   it('disables the current-problem tab until a solution is open', () => {

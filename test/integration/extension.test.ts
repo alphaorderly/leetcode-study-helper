@@ -24,6 +24,7 @@ interface RepositorySnapshot {
   name: string;
   rootUri: string;
   gitRemote?: string;
+  hasGit?: boolean;
   problems: ProblemSnapshot[];
   submission?: {
     status: 'checking' | 'ready' | 'unsupported' | 'blocked' | 'unavailable';
@@ -51,6 +52,7 @@ interface ExtensionSnapshot {
   nickname: string;
   preferredLanguage: string;
   repositories: RepositorySnapshot[];
+  workspace: { kind: string; nestedStudyFolders: Array<{ name: string; uri: string }> };
   currentProblem?: {
     rootUri: string;
     slug: string;
@@ -117,6 +119,22 @@ suite('LeetCode Study Helper integration', () => {
     }
     await configuration.update('nickname', undefined, vscode.ConfigurationTarget.Global);
     await configuration.update('preferredLanguage', undefined, vscode.ConfigurationTarget.Global);
+  });
+
+  test('classifies the opened folders as a study workspace and detects which roots are Git repositories', async () => {
+    const state = await waitForState(
+      (candidate) =>
+        candidate.repositories.length > 0 &&
+        candidate.repositories.every(({ hasGit }) => hasGit !== undefined),
+    );
+
+    assert.equal(state.workspace.kind, 'study');
+    assert.deepEqual(state.workspace.nestedStudyFolders, []);
+    // study-a is initialized as a Git repository by the fixture script; study-b is a plain folder.
+    const hasGitByName = Object.fromEntries(
+      state.repositories.map(({ name, hasGit }) => [name, hasGit]),
+    );
+    assert.deepEqual(hasGitByName, { 'study-a': true, 'study-b': false });
   });
 
   test('exposes the built-in Git executable used for durable preparation backups', async () => {

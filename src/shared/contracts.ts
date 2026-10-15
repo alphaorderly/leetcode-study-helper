@@ -72,6 +72,11 @@ export interface RepositorySnapshot {
   name: string;
   rootUri: string;
   gitRemote?: string;
+  /**
+   * 루트가 Git 저장소인지 나타냅니다. Git 조회가 끝나기 전에는 undefined이며,
+   * false는 VS Code Git이 이 루트를 저장소로 인식하지 못했다는 확정 신호입니다.
+   */
+  hasGit?: boolean;
   problems: ProblemSnapshot[];
   submission?: RepositorySubmissionSnapshot;
 }
@@ -295,6 +300,29 @@ export interface DetectionIssue {
   message: string;
 }
 
+/**
+ * 열린 워크스페이스를 온보딩 관점에서 분류한 종류입니다.
+ * none은 열린 폴더가 없음, empty는 의미 있는 항목이 없는 폴더, nested는 바로 아래에 스터디 저장소가 있는 폴더,
+ * other는 스터디와 무관한 프로젝트, broken은 카탈로그가 있으나 읽을 수 없는 폴더, study는 지원 저장소입니다.
+ * 여러 루트는 study, broken, nested, other, empty, none 순서로 가장 앞선 종류 하나를 택합니다.
+ */
+export type WorkspaceKind = 'none' | 'empty' | 'nested' | 'other' | 'broken' | 'study';
+
+/** 열린 폴더 바로 아래에서 찾은 스터디 저장소 후보의 표시 이름과 폴더 URI입니다. */
+export interface NestedStudyFolder {
+  name: string;
+  uri: string;
+}
+
+/**
+ * 워크스페이스 분류 결과입니다. nestedStudyFolders는 kind가 nested일 때만 채워지며,
+ * 웹뷰가 폴더 열기를 요청할 때 호스트가 이 목록과 대조해 허용된 URI만 엽니다.
+ */
+export interface WorkspaceSnapshot {
+  kind: WorkspaceKind;
+  nestedStudyFolders: NestedStudyFolder[];
+}
+
 /** 새 풀이 생성에 사용하는 언어 ID, 표시 이름과 파일 확장자입니다. */
 export interface LanguageOption {
   id: string;
@@ -313,6 +341,7 @@ export interface ExtensionSnapshot {
   languages: LanguageOption[];
   repositories: RepositorySnapshot[];
   issues: DetectionIssue[];
+  workspace: WorkspaceSnapshot;
   workspaceTrusted: boolean;
   currentProblem?: CurrentProblemSnapshot;
   telemetry?: TelemetrySettingsSnapshot;
@@ -331,6 +360,14 @@ export interface LineLintFixResult {
   fixed: number;
   ignored: number;
 }
+
+/**
+ * 온보딩 카드에서 요청하는 동작입니다. openFolder는 폴더 선택 대화상자, cloneRepository는 내 포크 클론,
+ * openForkPage는 공식 저장소의 포크 페이지, openNestedFolder는 target으로 지정한 하위 저장소 열기,
+ * recheck는 탐색과 GitHub 확인을 다시 실행합니다.
+ */
+export type OnboardingAction =
+  'openFolder' | 'cloneRepository' | 'openForkPage' | 'openNestedFolder' | 'recheck';
 
 /**
  * 브라우저에서 확장 호스트로 보내는 사용자 명령입니다. URI는 문자열로 전달합니다.
@@ -360,7 +397,8 @@ export type WebviewToExtensionMessage =
   | { type: 'prepareNextWeek'; rootUri: string }
   | { type: 'preparationAction'; rootUri: string; operationId: string; action: PreparationAction }
   | { type: 'refreshSubmission' }
-  | { type: 'signInGitHub' };
+  | { type: 'signInGitHub' }
+  | { type: 'onboarding'; action: OnboardingAction; target?: string };
 
 /** 전체 상태, 현재 문제 변경과 작업 중 여부를 웹뷰에 전달하는 메시지 계약입니다. */
 export type ExtensionToWebviewMessage =

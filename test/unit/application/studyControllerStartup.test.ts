@@ -114,6 +114,7 @@ describe('StudyController startup', () => {
             },
           ],
           issues: [],
+          workspace: { kind: 'study', nestedStudyFolders: [] },
         }));
       },
     }));

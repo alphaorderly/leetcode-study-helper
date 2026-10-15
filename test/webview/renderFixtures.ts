@@ -11,6 +11,7 @@ export function createSnapshot(): ExtensionSnapshot {
     ],
     workspaceTrusted: true,
     issues: [],
+    workspace: { kind: 'study', nestedStudyFolders: [] },
     repositories: [
       {
         name: 'study-a',

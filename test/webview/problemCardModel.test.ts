@@ -25,6 +25,7 @@ const state: ExtensionSnapshot = {
   ],
   repositories: [],
   issues: [],
+  workspace: { kind: 'none', nestedStudyFolders: [] },
   workspaceTrusted: true,
 };
 

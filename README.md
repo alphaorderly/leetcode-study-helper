@@ -38,7 +38,7 @@
 
 ### 0. 저장소 준비
 
-[DaleStudy/leetcode-study](https://github.com/DaleStudy/leetcode-study)를 포크하고 로컬에 클론한 뒤, `problem-categories.json`과 문제 폴더가 있는 저장소 루트를 에디터로 엽니다.
+[DaleStudy/leetcode-study](https://github.com/DaleStudy/leetcode-study)를 포크하고 로컬에 클론한 뒤, `problem-categories.json`과 문제 폴더가 있는 저장소 루트를 에디터로 엽니다. 폴더를 열지 않았거나 빈 폴더라면 사이드바의 **포크 만들기 → 내 포크 클론** 버튼이 같은 과정을 안내합니다.
 
 ```sh
 git clone https://github.com/<github-id>/leetcode-study.git

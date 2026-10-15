@@ -156,6 +156,7 @@ function snapshot(nickname = 'CaseUser'): ExtensionSnapshot {
     languages: [],
     workspaceTrusted: true,
     issues: [],
+    workspace: { kind: 'study', nestedStudyFolders: [] },
     repositories: [
       {
         name: 'private-repository',

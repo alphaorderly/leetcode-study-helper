@@ -13,7 +13,11 @@ import {
   OTHER_SOLUTION_CONFIRM_LABEL,
 } from '../domain/solutions/otherSolutions';
 import { isIgnoredByLineLint, isValidNickname } from '../domain/solutions/solutions';
+import { NO_WORKSPACE } from '../domain/workspace/classifyWorkspace';
+import { GITHUB_AUTH_PROVIDER, GITHUB_AUTH_SCOPES } from '../infrastructure/github/githubAuth';
+import { CANONICAL_FORK_URL, CANONICAL_REPOSITORY } from '../shared/canonicalRepository';
 import type {
+  OnboardingAction,
   PreparationAction,
   CurrentProblemSnapshot,
   ExtensionSnapshot,
@@ -75,6 +79,7 @@ export class StudyController implements vscode.Disposable {
     languages: [...LANGUAGE_OPTIONS],
     repositories: [],
     issues: [],
+    workspace: NO_WORKSPACE,
     workspaceTrusted: vscode.workspace.isTrusted,
   };
 
@@ -146,7 +151,8 @@ export class StudyController implements vscode.Disposable {
     const repositoryState = await this.repositoryRefreshSession.refresh(nickname);
     if (
       this.snapshot.repositories !== repositoryState.repositories ||
-      this.snapshot.issues !== repositoryState.issues
+      this.snapshot.issues !== repositoryState.issues ||
+      this.snapshot.workspace !== repositoryState.workspace
     ) {
       this.publishRepositoryState(repositoryState);
     }
@@ -485,6 +491,74 @@ export class StudyController implements vscode.Disposable {
     return this.submissionCommands.signInGitHub();
   }
 
+  /**
+   * 온보딩 카드의 동작을 실행합니다. 하위 폴더는 현재 스냅샷이 제시한 후보만 열고,
+   * 포크 페이지는 고정된 공식 저장소 주소만 열어 웹뷰가 보낸 임의의 대상을 따르지 않습니다.
+   * @throws 허용되지 않은 폴더이거나 VS Code Git 확장을 쓸 수 없어 클론할 수 없는 경우.
+   */
+  async handleOnboardingAction(action: OnboardingAction, target?: string): Promise<void> {
+    switch (action) {
+      case 'openFolder':
+        await vscode.commands.executeCommand('workbench.action.files.openFolder');
+        return;
+      case 'cloneRepository':
+        await this.cloneRepository();
+        return;
+      case 'openForkPage':
+        await vscode.env.openExternal(vscode.Uri.parse(CANONICAL_FORK_URL));
+        return;
+      case 'openNestedFolder': {
+        const folder = this.snapshot.workspace.nestedStudyFolders.find(({ uri }) => uri === target);
+        if (!folder) {
+          throw new Error('열 수 있는 스터디 폴더가 아닙니다. 새로 고친 뒤 다시 시도해 주세요.');
+        }
+        await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.parse(folder.uri));
+        return;
+      }
+      case 'recheck':
+        await this.refresh();
+        await this.refreshSubmission();
+        return;
+    }
+  }
+
+  /**
+   * VS Code 내장 클론 명령을 실행합니다. 이미 로그인된 GitHub 계정이 있으면 그 계정의 포크 주소를 미리 채우고,
+   * 없으면 사용자가 직접 입력하게 둡니다. 로그인 창은 띄우지 않습니다.
+   * 실행이 거부되면 원인을 가리지 않도록 원래 오류 메시지를 안내에 포함합니다.
+   */
+  private async cloneRepository(): Promise<void> {
+    const url = await this.suggestForkUrl();
+    try {
+      await (url
+        ? vscode.commands.executeCommand('git.clone', url)
+        : vscode.commands.executeCommand('git.clone'));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `클론 명령을 실행하지 못했습니다: ${reason} Git이 설치되어 있고 git.enabled가 켜져 있는지, 제한 모드가 아닌지 확인하거나 터미널에서 git clone으로 내 포크를 받아 주세요.`,
+        { cause: error },
+      );
+    }
+  }
+
+  /** 기존 GitHub 세션의 계정명으로 포크 주소를 추정합니다. 세션이 없거나 계정명이 안전하지 않으면 undefined입니다. */
+  private async suggestForkUrl(): Promise<string | undefined> {
+    try {
+      const session = await vscode.authentication.getSession(
+        GITHUB_AUTH_PROVIDER,
+        [...GITHUB_AUTH_SCOPES],
+        { createIfNone: false, silent: true },
+      );
+      const login = session?.account.label;
+      return login && /^[A-Za-z0-9-]+$/.test(login)
+        ? `https://github.com/${login}/${CANONICAL_REPOSITORY}.git`
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** 하위 세션·서비스 구독을 해제하고 화면 상태 이벤트 발행기를 종료합니다. */
   dispose(): void {
     for (const disposable of this.disposables) {
@@ -582,6 +656,7 @@ export class StudyController implements vscode.Disposable {
       ...this.snapshot,
       repositories: state.repositories,
       issues: state.issues,
+      workspace: state.workspace,
       workspaceTrusted: vscode.workspace.isTrusted,
       currentProblem: this.currentProblemSession.currentSnapshot,
     };

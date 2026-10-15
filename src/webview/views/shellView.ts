@@ -1,14 +1,9 @@
 import type { CurrentProblemSnapshot } from '../../shared/contracts';
 import { toggleGroup } from '../components/controls';
 import { element } from '../components/dom';
-import { currentProblemTabModel, shellNotices } from '../state/shellModel';
+import { currentProblemTabModel } from '../state/shellModel';
 import type { GroupingMode, StatusFilter } from '../state/problemViewModel';
 import type { ViewContext, ViewMode } from '../state/viewTypes';
-
-/** 닉네임 미설정과 지원 저장소 미발견 안내를 문단으로 만듭니다. */
-export function renderNotices(state: ViewContext['state'] | undefined): HTMLElement[] {
-  return shellNotices(state).map((text) => element('p', 'empty-state', text));
-}
 
 /** 루트별 탐색 오류를 안내 문구로 변환합니다. */
 export function renderIssues(state: ViewContext['state'] | undefined): HTMLElement[] {

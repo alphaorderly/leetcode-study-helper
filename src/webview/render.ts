@@ -4,12 +4,14 @@ import type {
   TelemetrySettingsSnapshot,
 } from '../shared/contracts';
 import { element } from './components/dom';
+import { onboardingModel } from './state/onboardingModel';
 import { hasRepositories, listChromeHidden } from './state/shellModel';
 import type { PostMessage, UiState, ViewContext } from './state/viewTypes';
 import { CurrentProblemViewRenderer } from './views/currentProblemView';
 import { renderProblemList } from './views/problemListView';
 import { renderSettings, updateSettingsBusy, updateTelemetrySettings } from './views/settingsView';
-import { renderControls, renderIssues, renderNotices, renderViewTabs } from './views/shellView';
+import { renderOnboarding } from './views/onboardingView';
+import { renderControls, renderIssues, renderViewTabs } from './views/shellView';
 import { renderSubmissionView } from './views/submissionView';
 
 export type { GroupingMode, StatusFilter } from './state/problemViewModel';
@@ -23,7 +25,7 @@ export type { PostMessage, UiState, ViewMode } from './state/viewTypes';
  */
 export class WebviewRenderer {
   private readonly settingsRegion = element('div', 'app-region app-settings-region');
-  private readonly noticesRegion = element('div', 'app-region app-notices-region');
+  private readonly onboardingRegion = element('div', 'app-region app-notices-region');
   private readonly controlsRegion = element('div', 'app-region app-controls-region');
   private readonly tabsRegion = element('div', 'app-region app-tabs-region');
   private readonly contentRegion = element('div', 'app-region app-content-region');
@@ -40,8 +42,8 @@ export class WebviewRenderer {
   ) {
     this.controlsRegion.append(renderControls(ui, () => this.renderList()));
     this.root.replaceChildren(
+      this.onboardingRegion,
       this.settingsRegion,
-      this.noticesRegion,
       this.controlsRegion,
       this.tabsRegion,
       this.contentRegion,
@@ -64,7 +66,7 @@ export class WebviewRenderer {
       this.ui.viewMode = 'list';
     }
     this.renderSettings();
-    this.renderNotices();
+    this.renderOnboarding();
     this.renderControlsVisibility();
     this.renderTabs();
     this.renderContent();
@@ -108,6 +110,7 @@ export class WebviewRenderer {
     }
     this.ui.busy = busy;
     this.renderSettings();
+    this.renderOnboarding();
     this.renderTabs();
     this.renderContent();
     this.updateBusyAttribute();
@@ -117,6 +120,11 @@ export class WebviewRenderer {
   private renderSettings(): void {
     const context = this.context();
     if (!context) {
+      this.settingsSignature = undefined;
+      this.settingsRegion.replaceChildren();
+      return;
+    }
+    if (!onboardingModel(context.state, context.ui.submissionRepository).showSettings) {
       this.settingsSignature = undefined;
       this.settingsRegion.replaceChildren();
       return;
@@ -138,9 +146,14 @@ export class WebviewRenderer {
     updateSettingsBusy(this.settingsRegion, context.ui.busy);
   }
 
-  /** 닉네임 미설정과 지원 저장소 미발견 안내를 갱신합니다. */
-  private renderNotices(): void {
-    this.noticesRegion.replaceChildren(...renderNotices(this.state));
+  /** 열린 폴더 종류와 시작 단계에 맞는 온보딩 안내를 갱신합니다. 상태가 없으면 비웁니다. */
+  private renderOnboarding(): void {
+    const context = this.context();
+    this.onboardingRegion.replaceChildren(
+      ...(context
+        ? renderOnboarding(context, onboardingModel(context.state, context.ui.submissionRepository))
+        : []),
+    );
   }
 
   /** 저장소가 없으면 목록 검색·필터 컨트롤을 숨깁니다. */

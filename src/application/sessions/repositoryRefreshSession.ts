@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import type { DetectionIssue, RepositorySnapshot } from '../../shared/contracts';
+import { NO_WORKSPACE } from '../../domain/workspace/classifyWorkspace';
+import type { DetectionIssue, RepositorySnapshot, WorkspaceSnapshot } from '../../shared/contracts';
 import { TrailingTask } from '../../shared/async/trailingTask';
 import type {
   SolutionGitStatusResult,
@@ -15,10 +16,11 @@ interface PendingProblemRefresh {
   slug: string;
 }
 
-/** 저장소 목록과 루트별 탐색 오류를 담은 세션 갱신 결과입니다. */
+/** 저장소 목록, 루트별 탐색 오류와 워크스페이스 분류를 담은 세션 갱신 결과입니다. */
 export interface RepositoryRefreshState {
   readonly repositories: RepositorySnapshot[];
   readonly issues: DetectionIssue[];
+  readonly workspace: WorkspaceSnapshot;
 }
 
 /**
@@ -66,6 +68,7 @@ export class RepositoryRefreshSession implements vscode.Disposable {
   private state: RepositoryRefreshState = {
     repositories: [],
     issues: [],
+    workspace: NO_WORKSPACE,
   };
 
   readonly onDidChange = this.changeEmitter.event;
@@ -202,6 +205,7 @@ export class RepositoryRefreshSession implements vscode.Disposable {
     this.publish({
       repositories: reuseGitStatuses(scanResult.repositories, this.state.repositories),
       issues: scanResult.issues,
+      workspace: scanResult.workspace,
     });
     this.initialized = true;
     void this.refreshGitStatuses(true);
@@ -300,8 +304,26 @@ export class RepositoryRefreshSession implements vscode.Disposable {
         }
       });
       solutionWatcher.onDidDelete((uri) => this.scheduleProblemRefresh(folder, uri));
-      this.watchers.push(catalogWatcher, solutionWatcher);
+      // 빈 폴더·무관한 프로젝트·상위 폴더에서 루트 항목이 바뀌면 분류가 달라질 수 있습니다.
+      const rootWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(folder, '*'),
+        false,
+        true,
+        false,
+      );
+      rootWatcher.onDidCreate(() => this.scheduleRootRefresh());
+      rootWatcher.onDidDelete(() => this.scheduleRootRefresh());
+      this.watchers.push(catalogWatcher, solutionWatcher, rootWatcher);
     }
+  }
+
+  /** 지원 저장소가 없는 분류에서만 루트 항목 변경으로 전체 탐색을 예약합니다. */
+  private scheduleRootRefresh(): void {
+    const { kind } = this.state.workspace;
+    if (kind === 'study' || kind === 'broken') {
+      return;
+    }
+    this.scheduleFullRefresh();
   }
 
   /** 변경 파일이 속한 문제별로 요청을 모은 뒤 순서대로 부분 갱신합니다. */
@@ -360,6 +382,7 @@ function reuseGitStatuses(
     return {
       ...repository,
       gitRemote: previousRepository?.gitRemote,
+      hasGit: previousRepository?.hasGit,
       submission: previousRepository?.submission
         ? { ...previousRepository.submission, status: 'checking' }
         : undefined,
@@ -384,6 +407,7 @@ function applyGitStatuses(
   return {
     ...repository,
     gitRemote: result.remoteName,
+    hasGit: result.hasGit,
     submission: result.submission,
     problems: repository.problems.map((problem) => ({
       ...problem,
