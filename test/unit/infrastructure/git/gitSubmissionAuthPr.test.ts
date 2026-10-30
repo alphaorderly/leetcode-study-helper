@@ -11,7 +11,54 @@ import {
 } from './submissionTestHarness';
 import { GitStatusService } from '../../../../src/infrastructure/git/gitStatusService.js';
 
+function readySubmission(
+  week: number,
+  slug: string,
+  overrides: Partial<RepositorySubmissionSnapshot> = {},
+): RepositorySubmissionSnapshot {
+  const branch = `week-${String(week).padStart(2, '0')}`;
+  return {
+    status: 'ready',
+    branch,
+    submissionBranch: branch,
+    activeSubmissionWeek: week,
+    fork: { status: 'verified', owner: 'CaseUser', repository: 'leetcode-study' },
+    stagedFiles: [],
+    otherStagedFiles: [],
+    pendingCommits: [],
+    forkFiles: [
+      {
+        name: 'CaseUser.py',
+        uri: `file:///study/${slug}/CaseUser.py`,
+        relativePath: `${slug}/CaseUser.py`,
+        slug,
+        week,
+      },
+    ],
+    otherForkFiles: [],
+    summary: { working: 0, staged: 0, pushNeeded: 0, prPending: 1, merged: 0, unknown: 0 },
+    canSync: false,
+    canReturnToMain: false,
+    hasCanonicalRemote: true,
+    behindOfficialMain: false,
+    blockingTrackedFiles: [],
+    ...overrides,
+  };
+}
+
 describe('GitStatusService authPr', () => {
+  it('opens an onboarding PR from week-00 with the onboarding title and issue', async () => {
+    const service = new GitStatusService();
+
+    await service.openPullRequest(readySubmission(0, 'to-lower-case'), 'CaseUser');
+
+    const url = new URL(String(vi.mocked(vscode.commands.executeCommand).mock.calls[0]?.[1]));
+    expect(url.pathname).toBe('/DaleStudy/leetcode-study/compare/main...CaseUser:week-00');
+    expect(url.searchParams.get('title')).toBe('[CaseUser] Onboarding');
+    expect(url.searchParams.get('body')).toContain('- [x] #2885');
+    service.dispose();
+  });
+
   it('opens a PR comparison from the week branch to canonical main', async () => {
     const service = new GitStatusService();
     const submission: RepositorySubmissionSnapshot = {
@@ -62,6 +109,7 @@ describe('GitStatusService authPr', () => {
     expect(vscode.env.openExternal).not.toHaveBeenCalled();
     expect(url).toEqual(expect.stringContaining('%23'));
     expect(url).not.toEqual(expect.stringContaining('%2523'));
+    expect(new URL(String(url)).searchParams.get('title')).toBe('[CaseUser] WEEK 01 Solutions');
     expect(new URL(String(url)).searchParams.get('body')).toContain('- [x] #219');
     service.dispose();
   });

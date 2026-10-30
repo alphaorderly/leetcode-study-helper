@@ -7,6 +7,7 @@ import {
 } from '../state/submissionGraphModel';
 import type { ViewContext } from '../state/viewTypes';
 import { renderSubmissionGraph } from './submissionGraph';
+import { weekTag } from '../../shared/studyWeek';
 
 /** 저장소의 제출 단계별 풀이 수 중 0이 아닌 단계만 화면 요약 항목으로 만듭니다. */
 function renderSubmissionSummary(repository: RepositorySnapshot): HTMLElement {
@@ -119,7 +120,7 @@ export function renderSubmissionView(context: ViewContext, rerender: () => void)
       element(
         'p',
         undefined,
-        `${preparation.sourceBranch} → ${preparation.targetWeek ? `Week ${preparation.targetWeek}` : 'main'} · 보관 파일 ${preparation.files.length}개`,
+        `${preparation.sourceBranch} → ${preparation.targetWeek !== undefined ? weekTag(preparation.targetWeek) : 'main'} · 보관 파일 ${preparation.files.length}개`,
       ),
     );
     if (preparation.error) panel.append(element('p', 'issue', preparation.error));
@@ -138,7 +139,7 @@ export function renderSubmissionView(context: ViewContext, rerender: () => void)
           }),
       });
     if (!preparation.completed) {
-      if (preparation.phase === 'target' && preparation.targetWeek)
+      if (preparation.phase === 'target' && preparation.targetWeek !== undefined)
         panel.append(button('기존 주차 작업 열기', 'existingWeek'));
       if (preparation.conflicts.length)
         panel.append(button(`충돌 해결 (${preparation.conflicts.length})`, 'conflicts'));

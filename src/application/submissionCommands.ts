@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { PreparationAction, ExtensionSnapshot, RepositorySnapshot } from '../shared/contracts';
 import type { GitStatusService } from '../infrastructure/git/gitStatusService';
 import { requireSolution } from './snapshotQueries';
+import { weekTag } from '../shared/studyWeek';
 import {
   beginUsage,
   NOOP_USAGE,
@@ -109,7 +110,7 @@ export class SubmissionCommands {
         this.requireTrustedWorkspace('풀이를 커밋하려면 먼저 워크스페이스를 신뢰해야 합니다.');
         const repository = this.requireSubmissionRepository(rootUri);
         const submission = repository.submission!;
-        if (!submission.activeSubmissionWeek || submission.stagedFiles.length === 0) {
+        if (submission.activeSubmissionWeek === undefined || submission.stagedFiles.length === 0) {
           throw new Error('커밋 준비 상태인 풀이가 없습니다.');
         }
         if (submission.stagedFiles.some(({ week }) => week !== submission.activeSubmissionWeek)) {
@@ -427,13 +428,13 @@ export class SubmissionCommands {
 
   /** 주차가 없거나 활성 제출 주차와 다르면 작업을 중단하는 오류를 던집니다. */
   private validateSubmissionWeek(repository: RepositorySnapshot, week: number | undefined): void {
-    if (!week) {
+    if (week === undefined) {
       throw new Error('풀이의 주차를 확인할 수 없습니다.');
     }
     const activeWeek = repository.submission?.activeSubmissionWeek;
     if (activeWeek !== undefined && activeWeek !== week) {
       throw new Error(
-        `Week ${activeWeek} 제출이 끝나기 전에는 Week ${week} 풀이를 커밋에 추가할 수 없습니다.`,
+        `${weekTag(activeWeek)} 제출이 끝나기 전에는 ${weekTag(week)} 풀이를 커밋에 추가할 수 없습니다.`,
       );
     }
   }

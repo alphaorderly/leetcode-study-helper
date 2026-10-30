@@ -12,6 +12,35 @@ import {
 import { GitStatusService } from '../../../../src/infrastructure/git/gitStatusService.js';
 
 describe('GitStatusService commit', () => {
+  it('creates week-00 and commits an onboarding solution', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.indexChanges = [change('to-lower-case/CaseUser.py')];
+    const expected = [
+      {
+        name: 'CaseUser.py',
+        uri: 'file:///study/to-lower-case/CaseUser.py',
+        relativePath: 'to-lower-case/CaseUser.py',
+        slug: 'to-lower-case',
+        week: 0,
+      },
+    ];
+    const service = new GitStatusService();
+
+    await service.commit(
+      uri('file:///study') as never,
+      '[CaseUser] Onboarding',
+      expected,
+      expected,
+    );
+
+    expect(repository.createBranch).toHaveBeenCalledWith('week-00', true, 'upstream/main');
+    expect(repository.commit).toHaveBeenCalledWith('[CaseUser] Onboarding', {
+      requireUserConfig: true,
+      postCommitCommand: null,
+    });
+    service.dispose();
+  });
+
   it('commits only when the live index exactly matches the expected solutions', async () => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
     const solution = change('two-sum/CaseUser.py');
@@ -249,7 +278,7 @@ describe('GitStatusService commit', () => {
           week: 8,
         },
       ]),
-    ).rejects.toThrow('Week 1 풀이 외 변경');
+    ).rejects.toThrow('Week 01 풀이 외 변경');
 
     expect(repository.log).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -376,7 +405,7 @@ describe('GitStatusService commit', () => {
           week: 8,
         },
       ]),
-    ).rejects.toThrow('Week 1 풀이 외 변경');
+    ).rejects.toThrow('Week 01 풀이 외 변경');
 
     expect(repository.log).toHaveBeenCalledWith(
       expect.objectContaining({

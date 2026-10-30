@@ -391,13 +391,17 @@ export function pullRequestStatus(
   return pullRequest.state === 'closed' ? 'closed-unmerged' : 'open';
 }
 
-/** PR head 브랜치를 우선 사용하며 없으면 제목의 WEEK 번호로 주차 브랜치를 추론합니다. */
+/** PR head 브랜치를 우선 사용하며 없으면 제목의 Onboarding 또는 WEEK 번호로 주차 브랜치를 추론합니다. */
 function pullRequestBranch(pullRequest: GitHubPullRequest): string | undefined {
   const branch = pullRequest.head?.ref;
   if (branch) {
     return branch;
   }
-  const week = pullRequest.title.match(/\bWEEK\s+(\d{1,2})\b/i)?.[1];
+  const title = pullRequest.title.replace(/^\s*\[[^\]]+\]\s*/, '');
+  if (/^\s*Onboarding\b/i.test(title)) {
+    return 'week-00';
+  }
+  const week = title.match(/\bWEEK\s+(\d{1,2})\b/i)?.[1];
   return week ? `week-${week.padStart(2, '0')}` : undefined;
 }
 

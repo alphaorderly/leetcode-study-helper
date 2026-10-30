@@ -9,6 +9,7 @@ import {
   type RemoteSubmissionState,
 } from '../../github/githubSubmissionClient';
 import { buildPullRequestBody, buildPullRequestCompareUrl } from '../../github/pullRequestBody';
+import { submissionTitle, weekTag } from '../../../shared/studyWeek';
 import { getRefRelation } from '../refRelation';
 import { SubmissionBranches } from './submissionBranches';
 import { submissionFilesByPath, type SubmissionSolution } from './submissionFiles';
@@ -54,14 +55,16 @@ export class SubmissionActions {
     solutions: readonly SubmissionSolution[],
     observer?: GitOperationObserver,
   ): Promise<void> {
-    if (!week) {
+    if (week === undefined) {
       throw new Error('주차가 지정된 풀이만 제출할 수 있습니다.');
     }
     const repository = await this.guards.requireSubmissionMutation(repositoryRoot, false);
     const branch = weekBranchName(week);
     const currentBranch = repository.state.HEAD?.name;
     if (currentBranch !== 'main' && currentBranch !== branch) {
-      throw new Error(`Week ${week} 풀이는 main 또는 ${branch} 브랜치에서만 추가할 수 있습니다.`);
+      throw new Error(
+        `${weekTag(week)} 풀이는 main 또는 ${branch} 브랜치에서만 추가할 수 있습니다.`,
+      );
     }
     if (repository.state.indexChanges.length === 0 && currentBranch === 'main') {
       await this.branches.requireSynchronizedMain(repository, solutions);
@@ -124,7 +127,7 @@ export class SubmissionActions {
     const currentBranch = repository.state.HEAD?.name;
     if (currentBranch !== 'main' && currentBranch !== submissionBranch) {
       throw new Error(
-        `Week ${week} 커밋은 main 또는 ${submissionBranch} 브랜치에서만 만들 수 있습니다.`,
+        `${weekTag(week)} 커밋은 main 또는 ${submissionBranch} 브랜치에서만 만들 수 있습니다.`,
       );
     }
     this.requireCommitFiles(repository, expectedPaths);
@@ -200,7 +203,7 @@ export class SubmissionActions {
     const verifiedOrigin = this.guards.requireOrigin(repository);
     const submissionBranch = repository.state.HEAD?.name;
     const branchWeek = weekFromBranch(submissionBranch);
-    if (!submissionBranch || !branchWeek) {
+    if (!submissionBranch || branchWeek === undefined) {
       throw new Error('push는 week-XX 제출 브랜치에서만 실행할 수 있습니다.');
     }
     const canonicalMain = await this.branches.fetchCanonicalMain(repository);
@@ -363,7 +366,7 @@ export class SubmissionActions {
       const paths = await this.guards.readSubmissionCommitPaths(repository, commit);
       for (const relativePath of paths) {
         const solution = fileByPath.get(relativePath);
-        if (!solution?.week) {
+        if (solution?.week === undefined) {
           throw new Error(`풀이 외 파일이 포함된 커밋은 자동 push할 수 없습니다: ${relativePath}`);
         }
         pendingWeeks.add(solution.week);
@@ -375,7 +378,7 @@ export class SubmissionActions {
     }
     const pendingWeek = [...pendingWeeks][0]!;
     if (pendingWeek !== branchWeek) {
-      throw new Error(`${submissionBranch}에는 Week ${branchWeek} 풀이만 push할 수 있습니다.`);
+      throw new Error(`${submissionBranch}에는 ${weekTag(branchWeek)} 풀이만 push할 수 있습니다.`);
     }
     return { week: pendingWeek, problemCount: problemSlugs.size };
   }
@@ -404,7 +407,7 @@ export class SubmissionActions {
     const remoteWeeks = new Set<number>();
     for (const relativePath of remotePaths) {
       const solution = fileByPath.get(relativePath);
-      if (!solution?.week) {
+      if (solution?.week === undefined) {
         throw new Error(
           `포크 또는 열린 PR에 풀이 외 파일이 있어 자동 push할 수 없습니다: ${relativePath}`,
         );
@@ -417,7 +420,7 @@ export class SubmissionActions {
     const remoteWeek = remoteWeeks.size === 1 ? [...remoteWeeks][0] : undefined;
     if (remoteWeek !== undefined && remoteWeek !== pendingWeek) {
       throw new Error(
-        `Week ${remoteWeek} 제출이 끝나기 전에는 Week ${pendingWeek} 커밋을 push할 수 없습니다.`,
+        `${weekTag(remoteWeek)} 제출이 끝나기 전에는 ${weekTag(pendingWeek)} 커밋을 push할 수 없습니다.`,
       );
     }
   }
@@ -532,7 +535,7 @@ export class SubmissionActions {
       throw new Error('PR을 만들기 전에 로컬 커밋을 origin에 push해 주세요.');
     }
     if (
-      !submission.activeSubmissionWeek ||
+      submission.activeSubmissionWeek === undefined ||
       !submission.submissionBranch ||
       submission.fork.status !== 'verified'
     ) {
@@ -542,8 +545,7 @@ export class SubmissionActions {
     if (!owner) {
       throw new Error('포크 소유자를 확인할 수 없습니다.');
     }
-    const weekLabel = String(submission.activeSubmissionWeek).padStart(2, '0');
-    const title = `[${nickname}] WEEK ${weekLabel} Solutions`;
+    const title = submissionTitle(nickname, submission.activeSubmissionWeek);
     const files = submission.forkFiles.filter(
       ({ week }) => week === submission.activeSubmissionWeek,
     );
@@ -583,7 +585,7 @@ function validateCommitInput(message: string, expectedFiles: readonly Submission
     throw new Error('커밋 준비 상태인 풀이가 없습니다.');
   }
   const weeks = new Set(expectedFiles.map(({ week }) => week));
-  if (weeks.size !== 1 || !expectedFiles[0]?.week) {
+  if (weeks.size !== 1 || expectedFiles[0]?.week === undefined) {
     throw new Error('서로 다른 주차의 풀이를 한 번에 커밋할 수 없습니다.');
   }
   const week = expectedFiles[0].week;

@@ -10,6 +10,77 @@ import {
 import { GitStatusService } from '../../../../src/infrastructure/git/gitStatusService.js';
 
 describe('GitStatusService push', () => {
+  it('pushes an onboarding solution from week-00', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-00';
+    repository.state.HEAD.upstream = undefined;
+    repository.state.HEAD.commit = 'local';
+    repository.log.mockResolvedValue([
+      { hash: 'local', message: '[CaseUser] Onboarding', parents: ['origin'] },
+    ]);
+    repository.diffBetween.mockResolvedValue([change('to-lower-case/CaseUser.py')]);
+    const service = new GitStatusService();
+
+    await service.push(uri('file:///study') as never, [
+      {
+        name: 'CaseUser.py',
+        uri: 'file:///study/to-lower-case/CaseUser.py',
+        slug: 'to-lower-case',
+        week: 0,
+      },
+    ]);
+
+    expect(repository.push).toHaveBeenCalledWith('origin', 'week-00', true);
+    service.dispose();
+  });
+
+  it('pushes another onboarding commit when the remote branch already contains the solution', async () => {
+    const repository = harness.repository as ReturnType<typeof createRepository>;
+    repository.state.HEAD.name = 'week-00';
+    repository.state.HEAD.commit = 'local-tip';
+    repository.state.HEAD.upstream = { remote: 'origin', name: 'week-00', commit: 'remote-tip' };
+    repository.state.refs.push({ name: 'origin/week-00', commit: 'remote-tip', remote: 'origin' });
+    repository.getMergeBase.mockImplementation(async (_ref1: string, ref2: string) =>
+      ref2 === 'origin/week-00' ? 'remote-tip' : 'origin',
+    );
+    repository.log.mockResolvedValue([
+      { hash: 'local-tip', message: '[CaseUser] Onboarding', parents: ['remote-tip'] },
+    ]);
+    repository.diffBetween.mockResolvedValue([change('to-lower-case/CaseUser.py')]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const requestUrl = String(input);
+        if (requestUrl.includes('/repos/CaseUser/leetcode-study')) {
+          return githubResponse({ fork: true, source: { full_name: 'DaleStudy/leetcode-study' } });
+        }
+        if (requestUrl.includes('/git/trees/main')) {
+          return githubResponse({ truncated: false, tree: [] });
+        }
+        if (requestUrl.includes('/compare/')) {
+          const files = requestUrl.includes(':week-00')
+            ? [{ filename: 'to-lower-case/CaseUser.py', status: 'added' }]
+            : [];
+          return githubResponse({ ahead_by: 0, behind_by: 0, files, commits: [] });
+        }
+        return githubResponse([]);
+      }),
+    );
+    const service = new GitStatusService();
+
+    await service.push(uri('file:///study') as never, [
+      {
+        name: 'CaseUser.py',
+        uri: 'file:///study/to-lower-case/CaseUser.py',
+        slug: 'to-lower-case',
+        week: 0,
+      },
+    ]);
+
+    expect(repository.push).toHaveBeenCalledWith('origin', 'week-00', false);
+    service.dispose();
+  });
+
   it('blocks push when an unpushed commit contains a non-solution file', async () => {
     const repository = harness.repository as ReturnType<typeof createRepository>;
     repository.state.HEAD.name = 'week-01';

@@ -306,6 +306,7 @@ describe('PreparationService observation', () => {
   });
 
   it.each([
+    { selected: ['to-lower-case/PrivateUser.py'], count: 1 },
     { selected: ['valid-anagram/PrivateUser.py', 'valid-anagram/PrivateUser.js'], count: 1 },
     {
       selected: [

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { SolutionFileSnapshot } from '../../src/shared/contracts';
-import { isUnpushed } from '../../src/webview/state/problemViewModel';
+import type { ProblemSnapshot, SolutionFileSnapshot } from '../../src/shared/contracts';
+import { groupProblems, isUnpushed } from '../../src/webview/state/problemViewModel';
 
 function solution(overrides: Partial<SolutionFileSnapshot>): SolutionFileSnapshot {
   return {
@@ -30,5 +30,36 @@ describe('isUnpushed', () => {
     expect(isUnpushed(solution({ gitStatus: 'unpushed' }))).toBe(true);
     expect(isUnpushed(solution({ gitStatus: 'unpushed', submissionStatus: 'unknown' }))).toBe(true);
     expect(isUnpushed(solution({ gitStatus: 'pushed' }))).toBe(false);
+  });
+});
+
+function problem(slug: string, week: number | undefined): ProblemSnapshot {
+  return {
+    slug,
+    week,
+    difficulty: 'Easy',
+    categories: [],
+    blindCategories: [],
+    completed: false,
+    hasOtherSolutions: false,
+    solutions: [],
+  };
+}
+
+describe('groupProblems by week', () => {
+  it('puts the onboarding week first once the repository has its problem', () => {
+    const groups = groupProblems(
+      [problem('two-sum', 1), problem('to-lower-case', 0), problem('private-problem', undefined)],
+      'week',
+    );
+
+    expect(groups.map(({ label }) => label)).toEqual(['온보딩', '1주차', '주차 미지정']);
+    expect(groups[0]!.problems.map(({ slug }) => slug)).toEqual(['to-lower-case']);
+  });
+
+  it('shows no onboarding group while the repository lacks the onboarding problem', () => {
+    const groups = groupProblems([problem('two-sum', 1), problem('valid-anagram', 2)], 'week');
+
+    expect(groups.map(({ label }) => label)).toEqual(['1주차', '2주차']);
   });
 });

@@ -20,6 +20,7 @@ import {
   type GitOperationObserver,
   type GitOperationResult,
 } from './operationObservation';
+import { weekTag } from '../../../shared/studyWeek';
 
 /** 삭제된 풀이도 주차에 연결하기 위한 카탈로그 범위입니다. */
 export interface PreparationScope {
@@ -159,14 +160,19 @@ export class PreparationService {
             ? scope.problems.find((problem) => problem.slug === file.split('/')[0])?.week
             : undefined);
         const weeks = [
-          ...new Set(preview.files.flatMap((file) => (weekFor(file) ? [weekFor(file)!] : []))),
+          ...new Set(
+            preview.files.flatMap((file) => {
+              const week = weekFor(file);
+              return week === undefined ? [] : [week];
+            }),
+          ),
         ].filter((week) => `week-${String(week).padStart(2, '0')}` !== preview.branch);
         let targetWeek: number | undefined;
         let selected: string[] = [];
         if (preview.files.length) {
           const items = [
             ...weeks.map((week) => ({
-              label: `Week ${String(week).padStart(2, '0')}로 풀이 이동`,
+              label: `${weekTag(week)}로 풀이 이동`,
               week,
             })),
             { label: '모두 보관하고 main으로 돌아가기', week: undefined },
@@ -400,7 +406,7 @@ export class PreparationService {
     const records = await workflow.records();
     const choice = await vscode.window.showQuickPick(
       records.map((record) => ({
-        label: `${record.sourceBranch} → ${record.targetWeek ? `Week ${record.targetWeek}` : 'main'}`,
+        label: `${record.sourceBranch} → ${record.targetWeek !== undefined ? weekTag(record.targetWeek) : 'main'}`,
         description: record.id,
         record,
         picked: record.id === current.id,
@@ -550,7 +556,7 @@ function preparationResult(
     problemCount: new Set(
       record.selected.flatMap((file) => {
         const [slug, filename] = file.split('/');
-        return slug && filename && getProblemWeek(slug) ? [slug] : [];
+        return slug && filename && getProblemWeek(slug) !== undefined ? [slug] : [];
       }),
     ).size,
   };

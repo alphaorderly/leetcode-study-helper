@@ -6,6 +6,7 @@ import type {
   WebviewToExtensionMessage,
 } from '../../shared/contracts';
 import type { UiState } from './viewTypes';
+import { submissionTitle } from '../../shared/studyWeek';
 
 /** 제출 그래프 렌더에 공유하는 파생 플래그입니다. */
 export interface SubmissionGraphFacts {
@@ -322,12 +323,5 @@ export function commitMessageKey(rootUri: string, week: number | undefined): str
 
 /** 닉네임과 주차를 반영한 기본 커밋 메시지를 만듭니다. */
 export function defaultCommitMessage(nickname: string, week: number | undefined): string {
-  return week
-    ? `[${nickname}] WEEK ${String(week).padStart(2, '0')} Solutions`
-    : `[${nickname}] Solutions`;
-}
-
-/** 주차 번호를 두 자리 Week 표기로 바꿉니다. */
-export function weekPad(week: number): string {
-  return String(week).padStart(2, '0');
+  return week !== undefined ? submissionTitle(nickname, week) : `[${nickname}] Solutions`;
 }

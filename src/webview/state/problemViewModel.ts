@@ -4,6 +4,7 @@ import type {
   RepositorySnapshot,
   SolutionFileSnapshot,
 } from '../../shared/contracts';
+import { weekLabel } from '../../shared/studyWeek';
 
 /** 문제 목록에서 전체·완료·미완료 여부를 선택하는 필터입니다. */
 export type StatusFilter = 'all' | 'completed' | 'incomplete';
@@ -108,7 +109,7 @@ export function visibleProblems(
     if (!matchesFilter || !matchesPushStatus || !needle) {
       return matchesFilter && matchesPushStatus;
     }
-    const week = problem.week === undefined ? '' : `${problem.week}주차`;
+    const week = problem.week === undefined ? '' : weekLabel(problem.week);
     return [
       problem.slug,
       formatProblemTitle(problem.slug),
@@ -165,7 +166,7 @@ function groupByWeek(problems: ProblemSnapshot[]): ProblemGroup[] {
   const groups = [...scheduled.entries()]
     .sort(([left], [right]) => left - right)
     .map(([week, weekProblems]) => ({
-      label: `${week}주차`,
+      label: weekLabel(week),
       problems: sortByDifficulty(weekProblems),
     }));
   if (unscheduled.length > 0) {

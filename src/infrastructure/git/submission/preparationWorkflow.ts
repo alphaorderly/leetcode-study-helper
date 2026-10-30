@@ -127,7 +127,7 @@ export class PreparationWorkflow {
         ...record.extras,
       ].some((ref) => ref !== undefined && !/^[0-9a-f]{40,64}$/.test(ref)) ||
       (record.targetWeek !== undefined &&
-        (!Number.isInteger(record.targetWeek) || record.targetWeek < 1 || record.targetWeek > 99))
+        (!Number.isInteger(record.targetWeek) || record.targetWeek < 0 || record.targetWeek > 99))
     ) {
       throw new Error('준비 작업 기록의 브랜치와 ref를 확인할 수 없습니다.');
     }
@@ -294,7 +294,7 @@ export class PreparationWorkflow {
       throw new Error('미리보기 이후 Git 상태가 바뀌었습니다. 다시 확인해 주세요.');
     if (
       targetWeek !== undefined &&
-      (!Number.isInteger(targetWeek) || targetWeek < 1 || targetWeek > 99)
+      (!Number.isInteger(targetWeek) || targetWeek < 0 || targetWeek > 99)
     )
       throw new Error('잘못된 주차입니다.');
     if (selected.length && targetWeek === undefined)
@@ -396,9 +396,10 @@ export class PreparationWorkflow {
 
   /** 파일별 적용 진행을 기록하여 한 파일 실패가 다른 파일의 완료로 가려지지 않게 합니다. */
   private async applyDraft(record: PreparationRecord): Promise<void> {
-    const branch = record.targetWeek
-      ? `week-${String(record.targetWeek).padStart(2, '0')}`
-      : 'main';
+    const branch =
+      record.targetWeek !== undefined
+        ? `week-${String(record.targetWeek).padStart(2, '0')}`
+        : 'main';
     await this.expect(branch, record.targetHead!);
     if ((await this.conflicts()).length)
       throw new Error('충돌 파일을 해결한 뒤 계속을 눌러 주세요.');
@@ -563,7 +564,7 @@ export class PreparationWorkflow {
   /** 기존 주차를 덮어쓰지 않고 열며 이동하지 않은 초안은 보관함에 남깁니다. */
   async openExistingTarget(id: string): Promise<PreparationRecord> {
     const record = await this.read(id);
-    if (record.phase !== 'target' || !record.targetWeek)
+    if (record.phase !== 'target' || record.targetWeek === undefined)
       throw new Error('기존 주차를 열 수 있는 단계가 아닙니다.');
     await this.expect('main', record.syncedHead!);
     await this.requireClean();

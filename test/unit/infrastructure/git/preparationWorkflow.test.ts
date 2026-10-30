@@ -75,6 +75,25 @@ describe('persistent next-week preparation with real Git', () => {
     expect((await workflow.read(record.id)).phase).toBe('done');
   });
 
+  it('moves selected onboarding drafts to week-00', async () => {
+    await write('two/user.py', 'onboarding draft\n');
+    const record = await start(['two/user.py'], 0);
+
+    await workflow.resume(record.id);
+
+    expect(await git.text(['symbolic-ref', '--short', 'HEAD'])).toBe('week-00');
+    expect(await git.ref('refs/heads/week-00')).toBe(canonical);
+    expect(await fs.readFile(path.join(folder, 'two/user.py'), 'utf8')).toBe('onboarding draft\n');
+    expect(await git.text(['diff', '--cached'])).toBe('');
+    expect(await git.text(['diff', '--name-only'])).toBe('two/user.py');
+    expect(await workflow.read(record.id)).toMatchObject({
+      phase: 'done',
+      targetWeek: 0,
+      selected: ['two/user.py'],
+      applied: ['two/user.py'],
+    });
+  });
+
   it('preserves extra commits, partial staging, untracked binary and ignored files through transfer and cancellation', async () => {
     await write('two/user.py', 'extra commit\n');
     const extra = await commit('oops next week');

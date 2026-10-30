@@ -23,12 +23,15 @@ function file(name: string): SubmissionFileSnapshot {
 
 describe('submission status projection', () => {
   it('maps study weeks to canonical two-digit branch names', () => {
+    expect(weekBranchName(0)).toBe('week-00');
     expect(weekBranchName(1)).toBe('week-01');
     expect(weekBranchName(15)).toBe('week-15');
+    expect(weekFromBranch('week-00')).toBe(0);
     expect(weekFromBranch('week-01')).toBe(1);
     expect(weekFromBranch('week-15')).toBe(15);
     expect(weekFromBranch('week-1')).toBeUndefined();
-    expect(() => weekBranchName(0)).toThrow('주차');
+    expect(() => weekBranchName(-1)).toThrow('주차');
+    expect(() => weekBranchName(100)).toThrow('주차');
   });
 
   it('keeps local conflict and index states ahead of remote progress', () => {

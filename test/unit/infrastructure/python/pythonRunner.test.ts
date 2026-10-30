@@ -24,6 +24,25 @@ function runner(request: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe('Python LeetCode runner', () => {
+  it('runs the bundled onboarding cases against a Python solution', () => {
+    const data = dataset.problems['to-lower-case']!;
+    const request = {
+      mode: 'run',
+      source: 'class Solution:\n    def toLowerCase(self, s): return s.lower()\n',
+      filename: 'solution.py',
+      slug: 'to-lower-case',
+      entryPoint: data.entryPoint,
+      requiredObjects: data.requiredObjects,
+      test: data.test,
+      candidateId: 'c0m0',
+    };
+
+    expect(runner(request)).toMatchObject({ ok: true, outcome: 'passed', passed: 3, total: 3 });
+    expect(
+      runner({ ...request, source: 'class Solution:\n    def toLowerCase(self, s): return s\n' }),
+    ).toMatchObject({ ok: true, outcome: 'failed', total: 3, failedCase: 1 });
+  });
+
   it('discovers repeated classes and repeated methods independently', () => {
     const source = [
       'class Solution:',

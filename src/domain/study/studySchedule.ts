@@ -1,4 +1,6 @@
+/** 배열 인덱스가 곧 주차입니다. 0주차는 온보딩입니다. */
 export const WEEKLY_PROBLEM_SLUGS = [
+  ['to-lower-case'],
   [
     'contains-duplicate',
     'two-sum',
@@ -102,6 +104,7 @@ export const WEEKLY_PROBLEM_SLUGS = [
 
 /** DaleStudy issue numbers aligned with WEEKLY_PROBLEMS.md / WEEKLY_PROBLEM_SLUGS. */
 export const WEEKLY_PROBLEM_ISSUES = [
+  [2885],
   [217, 219, 237, 240, 264],
   [218, 230, 239, 241, 251],
   [220, 232, 254, 268, 275],
@@ -125,7 +128,7 @@ const problemIssueBySlug = new Map<string, number>();
 for (const [index, slugs] of WEEKLY_PROBLEM_SLUGS.entries()) {
   const issues = WEEKLY_PROBLEM_ISSUES[index]!;
   for (const [slugIndex, slug] of slugs.entries()) {
-    problemWeekBySlug.set(slug, index + 1);
+    problemWeekBySlug.set(slug, index);
     problemIssueBySlug.set(slug, issues[slugIndex]!);
   }
 }

@@ -3,7 +3,14 @@
 - 출처: [DaleStudy 문제 풀이 스케줄](https://github.com/orgs/DaleStudy/projects/6/views/5)
 - 기준 필드: `주차 (4기)`
 - 프로젝트 최종 갱신: 2026-07-08
-- 전체 구성: 15주, 75문제
+- 전체 구성: 온보딩(0주차) 1문제 + 15주 75문제
+- 온보딩은 DaleStudy 공지 계획을 미리 반영한 것으로, 공식 저장소에 문제가 추가되면 목록에 나타납니다.
+
+## 온보딩 (0주차)
+
+| 문제 | 슬러그 | 난이도 |
+| --- | --- | --- |
+| [To Lower Case](https://github.com/DaleStudy/leetcode-study/issues/2885) | `to-lower-case` | 쉬움 |
 
 ## 1주차
 

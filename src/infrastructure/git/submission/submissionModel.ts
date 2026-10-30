@@ -141,20 +141,19 @@ export function singleWeek(files: readonly SubmissionFileSnapshot[]): number | u
  * @throws 허용 범위 밖의 주차인 경우.
  */
 export function weekBranchName(week: number): string {
-  if (!Number.isInteger(week) || week < 1 || week > 99) {
+  if (!Number.isInteger(week) || week < 0 || week > 99) {
     throw new Error('제출할 주차를 확인할 수 없습니다.');
   }
   return `week-${String(week).padStart(2, '0')}`;
 }
 
-/** week-XX 형식의 유효한 주차를 반환하며 다른 브랜치는 undefined로 처리합니다. */
+/** week-XX 형식의 주차(온보딩 week-00 포함)를 반환하며 다른 브랜치는 undefined로 처리합니다. */
 export function weekFromBranch(branch: string | undefined): number | undefined {
   const match = branch?.match(/^week-(\d{2})$/);
   if (!match?.[1]) {
     return undefined;
   }
-  const week = Number(match[1]);
-  return week >= 1 ? week : undefined;
+  return Number(match[1]);
 }
 
 /** 커밋 메시지의 첫 줄을 다듬어 반환하며 빈 메시지는 기본 제목으로 대체합니다. */

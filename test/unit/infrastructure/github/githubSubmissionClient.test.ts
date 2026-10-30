@@ -109,6 +109,43 @@ afterEach(() => {
 });
 
 describe('GitHubSubmissionClient branch state', () => {
+  it.each([
+    ['[Onboarding] WEEK 01 Solutions', 'week-01'],
+    ['[Onboarding] WEEK 02 Solutions', 'week-02'],
+    ['[WEEK-01] Onboarding', 'week-00'],
+    ['Onboarding', 'week-00'],
+  ])('infers %s as %s when the PR head ref is missing', async (title, expectedBranch) => {
+    const openPullRequest = {
+      number: 77,
+      title,
+      html_url: 'https://github.com/DaleStudy/leetcode-study/pull/77',
+      state: 'open',
+      head: { repo: { full_name: 'CaseUser/leetcode-study' } },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes('/pulls?state=open')) return response([openPullRequest]);
+        if (url.includes('/git/trees/main')) return response({ truncated: false, tree: [] });
+        if (url.includes('/compare/')) return response({ files: [], commits: [], behind_by: 0 });
+        return response([]);
+      }),
+    );
+    const client = new GitHubSubmissionClient();
+
+    const state = await client.getRemoteSubmission(remote, undefined, true);
+
+    expect(state.openPullRequestCount).toBe(1);
+    expect(state.headBranch).toBe(expectedBranch);
+    expect(state.activePullRequest).toEqual(openPullRequest);
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      expect.stringContaining(`/compare/main...CaseUser:${expectedBranch}`),
+      expect.anything(),
+    );
+    client.dispose();
+  });
+
   it.each(['none', 'merged', 'closed-unmerged'] as const)(
     'reads the latest branch PR when open PRs are absent: %s',
     async (kind) => {

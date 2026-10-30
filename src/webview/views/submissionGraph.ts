@@ -18,11 +18,11 @@ import {
   submissionGraphFacts,
   submissionGraphLayout,
   submissionNoticeTexts,
-  weekPad,
   type GraphAction,
   type SubmissionGraphFacts,
 } from '../state/submissionGraphModel';
 import type { ViewContext } from '../state/viewTypes';
+import { weekTag } from '../../shared/studyWeek';
 
 /** 제출 단계 DOM 생성에 공유할 저장소·제출 상태와 파생 플래그입니다. */
 interface SubmissionRenderContext extends ViewContext {
@@ -335,7 +335,7 @@ function renderStagedNode(context: SubmissionRenderContext): HTMLElement | undef
   const staged = renderSubmissionNode(
     'staged',
     `커밋 준비 · 풀이 ${submission.stagedFiles.length}개`,
-    week ? `Week ${weekPad(week)}` : undefined,
+    week !== undefined ? weekTag(week) : undefined,
   );
   staged.body.append(renderFileList(submission.stagedFiles));
   const key = commitMessageKey(repository.rootUri, week);

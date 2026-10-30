@@ -28,8 +28,8 @@ describe('filtered LeetCodeDataset asset', () => {
       revision: '215604aeed660029df7de2fea5a4d7b6ed476a08',
       license: 'apache-2.0',
     });
-    expect(dataset.problemCount).toBe(68);
-    expect(Object.keys(dataset.problems)).toHaveLength(68);
+    expect(dataset.problemCount).toBe(69);
+    expect(Object.keys(dataset.problems)).toHaveLength(69);
     expect(dataset.missing).toEqual([
       'clone-graph',
       'design-add-and-search-words-data-structure',
@@ -48,5 +48,6 @@ describe('filtered LeetCodeDataset asset', () => {
     expect(dataset.problems['two-sum']).not.toHaveProperty('completion');
     expect(dataset.problems['two-sum']).not.toHaveProperty('response');
     expect(dataset.problems['two-sum']?.entryPoint).toBe('Solution().twoSum');
+    expect(dataset.problems['to-lower-case']?.entryPoint).toBe('Solution().toLowerCase');
   });
 });

@@ -4,6 +4,7 @@ import type {
   SolutionFileSnapshot,
   SolutionSubmissionStatus,
 } from '../../shared/contracts';
+import { weekTag } from '../../shared/studyWeek';
 
 /** 추가·해제를 제공할 수 있는 로컬 제출 상태인지 판별합니다. */
 export function canToggleStage(status: SolutionSubmissionStatus | undefined): boolean {
@@ -41,7 +42,7 @@ export function stageDisabledReason(
     submission.activeSubmissionWeek !== undefined &&
     submission.activeSubmissionWeek !== week
   ) {
-    return `Week ${submission.activeSubmissionWeek} 제출을 먼저 완료해 주세요.`;
+    return `${weekTag(submission.activeSubmissionWeek)} 제출을 먼저 완료해 주세요.`;
   }
   return undefined;
 }

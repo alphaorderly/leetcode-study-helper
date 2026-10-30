@@ -64,7 +64,7 @@ export function isUsageEventName(value: string): value is UsageEventName {
 function safeNumber(key: string, value: unknown): value is number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return false;
   if (key.endsWith('_week'))
-    return Number.isInteger(value) && value >= 1 && value <= WEEKLY_PROBLEM_SLUGS.length;
+    return Number.isInteger(value) && value >= 0 && value < WEEKLY_PROBLEM_SLUGS.length;
   if (key === 'duration_ms') return value <= 86400000;
   return Number.isInteger(value) && value <= 1000000;
 }

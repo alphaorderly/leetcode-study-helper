@@ -65,8 +65,8 @@ describe('usage payload schema', () => {
     expect(input.study_week).toBe(15);
   });
 
-  it('accepts only the seventy-five official problem slugs and derives their canonical week', () => {
-    expect(WEEKLY_PROBLEM_SLUGS.flat()).toHaveLength(75);
+  it('accepts only the seventy-six official problem slugs and derives their canonical week', () => {
+    expect(WEEKLY_PROBLEM_SLUGS.flat()).toHaveLength(76);
     for (const [index, slugs] of WEEKLY_PROBLEM_SLUGS.entries()) {
       for (const slug of slugs) {
         expect(
@@ -75,7 +75,7 @@ describe('usage payload schema', () => {
             problem_slug: slug,
             study_week: 999,
           }),
-        ).toEqual({ outcome: 'passed', problem_slug: slug, study_week: index + 1 });
+        ).toEqual({ outcome: 'passed', problem_slug: slug, study_week: index });
       }
     }
     for (const slug of ['three-sum', 'private-problem', '/Users/learner/two-sum', 'Two-Sum']) {
@@ -272,11 +272,19 @@ describe('usage payload schema', () => {
       sanitizeUsageProperties('next_week_preparation_finished', {
         outcome: 'completed',
         action: 'prepare',
-        source_week: 0,
+        source_week: -1,
         target_week: 1.5,
         problem_count: -2,
       }),
     ).toEqual({ outcome: 'completed', action: 'prepare' });
+    expect(
+      sanitizeUsageProperties('next_week_preparation_finished', {
+        outcome: 'completed',
+        action: 'prepare',
+        source_week: 0,
+        target_week: 1,
+      }),
+    ).toEqual({ outcome: 'completed', action: 'prepare', source_week: 0, target_week: 1 });
   });
 
   it('allows only explicit booleans and fixed language, result, phase, and error values', () => {

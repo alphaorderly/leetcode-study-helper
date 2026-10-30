@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RepositorySubmissionSnapshot } from '../../src/shared/contracts';
 import {
   blockingFilesModel,
+  defaultCommitMessage,
   pullRequestAction,
   remoteWriteDisabled,
   resolveSubmissionRepository,
@@ -235,5 +236,13 @@ describe('submissionGraphFacts and actions', () => {
     };
     expect(resolveSubmissionRepository([unverified, verified], 'file:///a')).toBe(unverified);
     expect(resolveSubmissionRepository([unverified, verified], undefined)).toBe(verified);
+  });
+});
+
+describe('defaultCommitMessage', () => {
+  it('uses the onboarding title for week 0 and the numbered title otherwise', () => {
+    expect(defaultCommitMessage('CaseUser', 0)).toBe('[CaseUser] Onboarding');
+    expect(defaultCommitMessage('CaseUser', 1)).toBe('[CaseUser] WEEK 01 Solutions');
+    expect(defaultCommitMessage('CaseUser', undefined)).toBe('[CaseUser] Solutions');
   });
 });

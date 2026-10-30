@@ -14,6 +14,7 @@ import {
   relativeChangePaths,
   relativeGitPath,
 } from '../vscodeGit';
+import { weekTag } from '../../../shared/studyWeek';
 
 export const MAX_PUSH_COMMITS = 200;
 
@@ -166,7 +167,9 @@ export class SubmissionGuards {
       for (const relativePath of paths) {
         const solution = fileByPath.get(relativePath);
         if (solution?.week !== expectedWeek) {
-          throw new Error(`${headRef}에 Week ${expectedWeek} 풀이 외 변경이 포함되어 있습니다.`);
+          throw new Error(
+            `${headRef}에 ${weekTag(expectedWeek)} 풀이 외 변경이 포함되어 있습니다.`,
+          );
         }
       }
     }

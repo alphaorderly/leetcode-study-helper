@@ -156,7 +156,7 @@ describe('SubmissionCommands', () => {
     const { commands } = await createCommands(submission());
 
     await expect(commands.stageSolution('file:///study/three-sum/CaseUser.py')).rejects.toThrow(
-      'Week 1 제출이 끝나기 전에는 Week 2',
+      'Week 01 제출이 끝나기 전에는 Week 02',
     );
 
     expect(gitMocks.stageSolution).not.toHaveBeenCalled();
@@ -168,6 +168,49 @@ describe('SubmissionCommands', () => {
     await commands.stageSolution('file:///study/two-sum/CaseUser.py');
 
     expect(gitMocks.stageSolution).toHaveBeenCalledOnce();
+  });
+
+  it('stages and commits an onboarding (week 0) solution', async () => {
+    const onboardingFile = {
+      name: 'CaseUser.py',
+      uri: 'file:///study/to-lower-case/CaseUser.py',
+      relativePath: 'to-lower-case/CaseUser.py',
+      slug: 'to-lower-case',
+      week: 0,
+    };
+    const { commands, snapshot } = await createCommands(
+      submission({ activeSubmissionWeek: undefined, forkFiles: [], activePullRequest: undefined }),
+    );
+    snapshot.repositories[0]!.problems.push({
+      slug: 'to-lower-case',
+      week: 0,
+      difficulty: 'Easy',
+      categories: [],
+      blindCategories: [],
+      completed: true,
+      hasOtherSolutions: false,
+      solutions: [{ name: 'CaseUser.py', uri: onboardingFile.uri, gitStatus: 'unpushed' }],
+    });
+
+    await commands.stageSolution(onboardingFile.uri);
+
+    expect(gitMocks.stageSolution).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      0,
+      expect.anything(),
+      expect.any(Function),
+    );
+
+    snapshot.repositories[0]!.submission = submission({
+      activeSubmissionWeek: 0,
+      stagedFiles: [onboardingFile],
+      forkFiles: [],
+      activePullRequest: undefined,
+    });
+    await commands.commitActiveWeek('file:///study', '[CaseUser] Onboarding');
+
+    expect(gitMocks.commit).toHaveBeenCalledOnce();
   });
 
   it('delegates the fresh push-range guard to the Git service', async () => {

@@ -180,11 +180,12 @@ export class SubmissionStatusReader {
     const branch = repository.state.HEAD?.name;
     const stagedWeek = singleWeek(stagedFiles);
     const currentBranchWeek = weekFromBranch(branch);
-    const requestedSubmissionBranch = currentBranchWeek
-      ? branch
-      : stagedWeek
-        ? weekBranchName(stagedWeek)
-        : undefined;
+    const requestedSubmissionBranch =
+      currentBranchWeek !== undefined
+        ? branch
+        : stagedWeek !== undefined
+          ? weekBranchName(stagedWeek)
+          : undefined;
     let canonicalRemoteName: string | undefined;
     try {
       canonicalRemoteName = resolveCanonicalRemoteName(repository.state.remotes);

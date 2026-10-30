@@ -44,7 +44,8 @@ export interface FixLineEndingsResult {
  */
 export class SolutionFileService {
   /**
-   * 파일명을 검증하고 디렉터리에서 존재 여부를 확인한 뒤 빈 파일을 기록합니다.
+   * 파일명을 검증하고 디렉터리에서 존재 여부를 확인한 뒤 빈 파일을 만듭니다.
+   * 확인 창 이후 다시 검사하고 파일 생성 시에도 기존 파일을 덮어쓰지 않도록 요청합니다.
    * 발견한 기존 파일은 exists로 반환하며 대소문자만 다른 이름은 오류입니다.
    * confirm이 true일 때만 생성 확인을 표시하고 취소는 cancelled로 반환합니다.
    * @throws 잘못된 닉네임·언어, 대소문자 충돌 또는 파일 시스템 읽기·쓰기 실패.
@@ -63,21 +64,8 @@ export class SolutionFileService {
     const problemUri = vscode.Uri.joinPath(rootUri, request.slug);
     const targetName = `${request.nickname}.${language.extension}`;
     const targetUri = vscode.Uri.joinPath(problemUri, targetName);
-    const entries = await vscode.workspace.fs.readDirectory(problemUri);
-    const names = entries.map(([name]) => name);
-    const status = targetFileStatus(names, targetName);
-
-    if (status === 'exists') {
-      return { status: 'exists', uri: targetUri };
-    }
-    if (status === 'case-conflict') {
-      const conflictingName = names.find(
-        (name) => name.toLocaleLowerCase('en-US') === targetName.toLocaleLowerCase('en-US'),
-      );
-      throw new Error(
-        `${conflictingName ?? '다른 파일'}과 대소문자만 다른 ${targetName} 파일은 만들 수 없습니다.`,
-      );
-    }
+    const existing = await findExistingTarget(problemUri, targetName, targetUri);
+    if (existing) return existing;
 
     if (request.confirm) {
       const relativePath = `${request.slug}/${targetName}`;
@@ -94,7 +82,24 @@ export class SolutionFileService {
       }
     }
 
-    await vscode.workspace.fs.writeFile(targetUri, new Uint8Array());
+    const afterConfirmation = await findExistingTarget(problemUri, targetName, targetUri);
+    if (afterConfirmation) return afterConfirmation;
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.createFile(targetUri, { overwrite: false, ignoreIfExists: false });
+    let applied: boolean;
+    try {
+      applied = await vscode.workspace.applyEdit(edit);
+    } catch (error) {
+      const raced = await findExistingTarget(problemUri, targetName, targetUri);
+      if (raced) return raced;
+      throw error;
+    }
+    if (!applied) {
+      const raced = await findExistingTarget(problemUri, targetName, targetUri);
+      if (raced) return raced;
+      throw new Error(`${targetName} 파일을 만들지 못했습니다.`);
+    }
     return { status: 'created', uri: targetUri };
   }
 
@@ -158,4 +163,25 @@ export class SolutionFileService {
 
     return { checked: uris.length, fixed };
   }
+}
+
+/** 현재 디렉터리의 정확한 이름과 대소문자 충돌을 구분합니다. */
+async function findExistingTarget(
+  problemUri: vscode.Uri,
+  targetName: string,
+  targetUri: vscode.Uri,
+): Promise<Extract<CreateSolutionResult, { status: 'exists' }> | undefined> {
+  const entries = await vscode.workspace.fs.readDirectory(problemUri);
+  const names = entries.map(([name]) => name);
+  const status = targetFileStatus(names, targetName);
+  if (status === 'exists') return { status: 'exists', uri: targetUri };
+  if (status === 'case-conflict') {
+    const conflictingName = names.find(
+      (name) => name.toLocaleLowerCase('en-US') === targetName.toLocaleLowerCase('en-US'),
+    );
+    throw new Error(
+      `${conflictingName ?? '다른 파일'}과 대소문자만 다른 ${targetName} 파일은 만들 수 없습니다.`,
+    );
+  }
+  return undefined;
 }

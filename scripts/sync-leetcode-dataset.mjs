@@ -1,5 +1,5 @@
 /**
- * 고정 revision의 원본 JSONL에서 주차표의 75개 문제를 선택해 포함 데이터셋을 다시 생성합니다.
+ * 고정 revision의 원본 JSONL에서 주차표의 76개 문제(온보딩 포함)를 선택해 포함 데이터셋을 다시 생성합니다.
  * 예상 누락 목록·중복·행 형식 검증을 통과해야 resources의 JSON을 덮어씁니다.
  * 일반 테스트용 조회 명령이 아니라 원격 다운로드와 파일 쓰기를 수행하는 개발 작업입니다.
  */
@@ -85,8 +85,8 @@ async function scanSplit(filename, wanted, found) {
 
 const weeklyProblems = await readFile(resolve('WEEKLY_PROBLEMS.md'), 'utf8');
 const slugs = currentSlugs(weeklyProblems);
-if (slugs.length !== 75 || new Set(slugs).size !== 75) {
-  throw new Error(`현재 문제 슬러그는 중복 없이 75개여야 합니다. 발견: ${slugs.length}`);
+if (slugs.length !== 76 || new Set(slugs).size !== 76) {
+  throw new Error(`현재 문제 슬러그는 중복 없이 76개여야 합니다. 발견: ${slugs.length}`);
 }
 
 const wanted = new Set(slugs);
